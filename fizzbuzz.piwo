@@ -1,0 +1,10 @@
+piwo int i = 0
+dopoki i < 100:
+    i = i + 1
+    jezeli ((i % 5) + (i % 3)) == 0:
+        wypisz "FizzBuzz " + (i + "\n")
+        dalej
+    jezeli i % 3 == 0:
+        wypisz "Fizz " + (i + "\n")
+    jezeli i % 5 == 0:
+        wypisz "Buzz " + (i + "\n")

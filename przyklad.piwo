@@ -1,0 +1,8 @@
+piwo int a = 10
+dopoki a:
+    wypisz a + "\n"
+    a = a - 1
+kufel float tablica[] = {15,20,30,40,50,62}
+dla tablica -> t:
+    wypisz (t / 10.0) + "\n"
+

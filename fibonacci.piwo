@@ -1,0 +1,24 @@
+funkcja fib(n : int):
+    jezeli n < 2:
+        zwroc n
+    piwo int fibP = 1
+    piwo int fib2 = 0
+    piwo int i = n
+    dopoki i:
+        piwo int t = fib2
+        fib2 = fib2 + fibP
+        fibP = t
+        i = i - 1
+        
+    zwroc fib2
+
+piwo int i = 1
+wino int NUMS = 10
+
+piwo int t
+dopoki i < NUMS:
+    i = i + 1
+    t = fib(i)
+    wypisz t + " "
+
+wypisz "\n"
