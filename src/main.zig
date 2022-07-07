@@ -14,11 +14,10 @@ pub fn main() anyerror!void {
     if (argv.len > 1) {
         for (argv) |arg, i| { // No idea why, but this way its the safest so fuck it
             if (i == 0) continue;
-            if (i == 1) try lex.tokenize(arg, alloc);
+            if (i == 1) _ = try lex.tokenize(arg, alloc);
+            if (i == 2) break;
         }
     } else {
         std.log.info("No file provided :/", .{});
     }
 }
-
-test "basic test" {}
