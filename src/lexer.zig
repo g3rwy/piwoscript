@@ -27,13 +27,14 @@ pub const Tok_enum = enum(u8) {
     SUB,
     MUL,
     DIV,
-    
     IF,
+    IF_PL,
     ELSE,
     FOREACH,
     WHILE,
+    WHILE_PL,
     ARROW,
-    SEMICOLON,
+    FUNC,
     IDENTIFIER,
     INDENT,
     DEDENT
@@ -55,15 +56,18 @@ const cmp_words = [_][]const u8{
     "*",
     "/",
     "jezeli",
+    "jeżeli",
     "inaczej",
     "dla",
     "dopoki",
+    "dopóki",
     "->",
-    ":"
+    "funkcja"
 };
 
 pub const Token = struct{tok : Tok_enum, value : ?[]const u8 = null};
 const SPACE_INDENT = 4;
+
 const LexerError = error {
     InvalidIndentation,
 };
@@ -225,6 +229,33 @@ test "recovering from indentation" { // TODO make DEDENT generator work for the 
             .{.tok = .PIWO},.{.tok = .NEWLINE},
             .{.tok = .DEDENT},.{.tok = .DEDENT},
             .{.tok = .PIWO},.{.tok = .NEWLINE},
+    };
+    
+    try testTokens(test1[0..],res);
+}
+
+// FIXME maybe find a better way to know if the token is polish, maybe translate it to normal token in future
+test "unicode polish letters working - 1" {
+    const res = try tokenize("jeżeli", test_alloc);
+    defer test_alloc.free(res); 
+    errdefer std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
+
+    const test1 = [_]Token{
+            .{.tok = .IF_PL},
+            .{.tok = .NEWLINE},
+    };
+    
+    try testTokens(test1[0..],res);
+}
+
+test "unicode polish letters working - 2" {
+    const res = try tokenize("dopóki", test_alloc);
+    defer test_alloc.free(res); 
+    errdefer std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
+
+    const test1 = [_]Token{
+            .{.tok = .WHILE_PL},
+            .{.tok = .NEWLINE},
     };
     
     try testTokens(test1[0..],res);
