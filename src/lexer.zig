@@ -35,6 +35,13 @@ pub const Tok_enum = enum(u8) {
     WHILE_PL,
     ARROW,
     FUNC,
+    RETURN,
+    RETURN_PL,
+    INPUT,
+    PRINT,
+    CONT,
+    BREAK,
+    
     IDENTIFIER,
     INDENT,
     DEDENT
@@ -62,7 +69,13 @@ const cmp_words = [_][]const u8{
     "dopoki",
     "dopóki",
     "->",
-    "funkcja"
+    "funkcja",
+    "zwroc",
+    "zwróć",
+    "podaj",
+    "wypisz",
+    "dalej",
+    "przerwij"
 };
 
 pub const Token = struct{tok : Tok_enum, value : ?[]const u8 = null};
@@ -109,24 +122,21 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
                }
                else{ break; }
         }
-
+        // if line has nothing other than indentation, just ignore it lol
+        if(line_start == line.len){ continue; }
+        
         if(line_start >= line.len) return token_list.toOwnedSlice();
         var indent_diff : i32 = @intCast(i32,curr_indent) - @intCast(i32,global_indent);
         
         if(indent_diff >= 2){ return LexerError.InvalidIndentation; }// having invalid scope, because like bruh
         
         else if(indent_diff < 0){ // means we are going down the scope <<
-            if(line[line_start] == '\n'){
-                line_start += 1;    if(line_start >= line.len) return token_list.toOwnedSlice();
+            while(indent_diff < 0) : (indent_diff += 1) {
+                try token_list.append(Token{.tok = .DEDENT});
             }
-            else{
-                while(indent_diff < 0) : (indent_diff += 1) {
-                    try token_list.append(Token{.tok = .DEDENT});
-                }
-                global_indent = curr_indent;
-            }
+            global_indent = curr_indent;
         }
-        else if(curr_indent != 0){ try token_list.append(Token{.tok = .INDENT}); global_indent += 1; }
+        else if(curr_indent != 0 and global_indent != curr_indent){ try token_list.append(Token{.tok = .INDENT}); global_indent += 1; }    
 // -----------------------------------------------------------------------------------------------------
 
 // Check for keywords and stuff separated by space
@@ -136,7 +146,13 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
         word = word_it.next() orelse break;
         for(cmp_words) |test_word,i| {
             if(eql(u8,test_word,word)){
-                try token_list.append(Token{.tok = @intToEnum(Tok_enum,i + @enumToInt(Tok_enum.STRING_TYPE))});
+                const tok = @intToEnum(Tok_enum,i + @enumToInt(Tok_enum.STRING_TYPE));
+                try token_list.append(Token{
+                .tok = switch(tok){ // if its a polish token, return an enum one place behind him which is the same one but not polish
+                            .IF_PL,.RETURN_PL,.WHILE_PL => @intToEnum(Tok_enum,i + @enumToInt(Tok_enum.STRING_TYPE) - 1),
+                            else => tok 
+                       }
+                });
                 continue :outer;
             }
         }
@@ -147,6 +163,12 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
         }
         try token_list.append(Token{.tok = .NEWLINE});        
 // --------------------------------------------------------------------------------------------------------------------
+    }
+
+    if(global_indent != 0){ // Recover from any scope left over at the end of the file
+        while(global_indent > 0) : (global_indent -= 1) {
+            try token_list.append(Token{.tok = .DEDENT});
+        }
     }
     return token_list.toOwnedSlice();
 }
@@ -198,7 +220,7 @@ test "basic variable assign" {
 
 
 test "basic indentation" {
-    const res = try tokenize("    piwo", test_alloc);
+    const res = try tokenize("\tpiwo", test_alloc);
     defer test_alloc.free(res); 
     errdefer std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
 
@@ -211,11 +233,11 @@ test "basic indentation" {
     try testTokens(test1[0..],res);
 }
 
-test "recovering from indentation" { // TODO make DEDENT generator work for the last line if there is nothing there
+test "recovering from indentation" {
     const source = \\piwo
                    \\    piwo
                    \\        piwo
-                   \\piwo
+                   //\\piwo
                    ;
     const res = try tokenize(source, test_alloc);
     defer test_alloc.free(res);
@@ -228,7 +250,28 @@ test "recovering from indentation" { // TODO make DEDENT generator work for the 
             .{.tok = .INDENT},
             .{.tok = .PIWO},.{.tok = .NEWLINE},
             .{.tok = .DEDENT},.{.tok = .DEDENT},
+            //.{.tok = .PIWO},.{.tok = .NEWLINE},
+    };
+    
+    try testTokens(test1[0..],res);
+}
+
+test "leaving line empty with indentation" { 
+    const source = \\piwo
+                   \\    piwo
+                   \\    
+                   \\    piwo
+                   ;
+    const res = try tokenize(source, test_alloc);
+    defer test_alloc.free(res);
+    errdefer std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
+
+    const test1 = [_]Token{
             .{.tok = .PIWO},.{.tok = .NEWLINE},
+            .{.tok = .INDENT},
+            .{.tok = .PIWO},.{.tok = .NEWLINE},
+            .{.tok = .PIWO},.{.tok = .NEWLINE},
+            .{.tok = .DEDENT},
     };
     
     try testTokens(test1[0..],res);
@@ -241,7 +284,7 @@ test "unicode polish letters working - 1" {
     errdefer std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
 
     const test1 = [_]Token{
-            .{.tok = .IF_PL},
+            .{.tok = .IF},
             .{.tok = .NEWLINE},
     };
     
@@ -254,7 +297,7 @@ test "unicode polish letters working - 2" {
     errdefer std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
 
     const test1 = [_]Token{
-            .{.tok = .WHILE_PL},
+            .{.tok = .WHILE},
             .{.tok = .NEWLINE},
     };
     
