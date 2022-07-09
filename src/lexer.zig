@@ -126,7 +126,7 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
             }
         }
 
-        if(line.len >= 2){
+        if(line_start + 1 < line.len){
             if(line[line_start] == 'c' and line[line_start + 1] == '['){
                 curr_state = .COMMENT;
                 line_start += 2;
@@ -395,6 +395,24 @@ test "skipping comments" {
             .{.tok = .PIWO},.{.tok = .NEWLINE},
             .{.tok = .DEDENT},
             .{.tok = .PIWO},.{.tok = .PIWO},.{.tok = .NEWLINE},
+    };
+    
+    try testTokens(test1[0..],res);
+    try freeTokenValues(res,test_alloc);
+}
+
+test "multiline comments" {
+    const source = \\c[
+                   \\ Everything here is skipped
+                   \\]
+                   \\piwo
+                   ;
+    const res = try tokenize(source, test_alloc);
+    defer test_alloc.free(res); 
+    errdefer std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
+
+    const test1 = [_]Token{
+            .{.tok = .PIWO},.{.tok = .NEWLINE},
     };
     
     try testTokens(test1[0..],res);
