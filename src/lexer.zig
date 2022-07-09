@@ -85,6 +85,12 @@ const LexerError = error {
     InvalidIndentation,
 };
 
+const TokenizingState = enum{
+    NORMAL,  
+    COMMENT,
+    STRING,
+};
+
 fn readFileToString(path: []const u8, allocator: std.mem.Allocator) ![]u8 {
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
@@ -92,25 +98,54 @@ fn readFileToString(path: []const u8, allocator: std.mem.Allocator) ![]u8 {
     return try file.reader().readAllAlloc(allocator, expected_max_size);
 }
 
-
 pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
     var token_list = ArrayList(Token).init(alloc);
     defer token_list.deinit();
-
-    //TODO Check for comments, maybe make function skip_comments()
-
+    
+    var curr_state = TokenizingState.NORMAL;
     var global_indent : u32 = 0;
+
     var it = std.mem.tokenize(u8, buffer, "\n");
     var line: []const u8 = undefined;
     
     while(true){
-        line = it.next() orelse break;
  // - Check for indentation - 
+        line = it.next() orelse break;
         var line_start  : u32 = 0;
         var curr_indent : u32 = 0;
         var space_count : u8  = 0;
+
+        // skip out comments if we are still in comment mode
+        if(curr_state == .COMMENT){
+            while(line_start < line.len) : (line_start += 1){
+                if(line[line_start] == ']'){
+                    curr_state = .NORMAL;
+                    line_start += 1;
+                    break;
+                }
+            }
+        }
+
+        if(line.len >= 2){
+            if(line[line_start] == 'c' and line[line_start + 1] == '['){
+                curr_state = .COMMENT;
+                line_start += 2;
+            }
+        }
+        if(line.len == line_start){ continue; }
         
         while(line_start < line.len){
+               if(curr_state == .COMMENT){
+                    if(line[line_start] == ']'){
+                        curr_state = .NORMAL;
+                        line_start += 1;
+                        continue;
+                    }
+                    else{
+                        line_start += 1; continue;
+                    }
+               }
+               
                if(line[line_start] == '\t'){
                     curr_indent += 1;
                     line_start  += 1;
@@ -120,12 +155,16 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
                     line_start  += 1;
                     if(space_count == SPACE_INDENT){ curr_indent += 1; space_count -= SPACE_INDENT;}
                }
-               else{ break; }
+               else if(line_start + 1 < line.len and curr_state == .NORMAL){
+                    if(line[line_start] == 'c' and line[line_start] != '['){
+                        curr_state = .COMMENT;
+                        line_start += 2;
+                        continue;
+                    } else { break; }
+               }      else{ break; }
         }
         // if line has nothing other than indentation, just ignore it lol
-        if(line_start == line.len){ continue; }
-        
-        if(line_start >= line.len) return token_list.toOwnedSlice();
+        if(line_start >= line.len or curr_state == .COMMENT) continue;
         var indent_diff : i32 = @intCast(i32,curr_indent) - @intCast(i32,global_indent);
         
         if(indent_diff >= 2){ return LexerError.InvalidIndentation; }// having invalid scope, because like bruh
@@ -139,31 +178,56 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
         else if(curr_indent != 0 and global_indent != curr_indent){ try token_list.append(Token{.tok = .INDENT}); global_indent += 1; }    
 // -----------------------------------------------------------------------------------------------------
 
-// Check for keywords and stuff separated by space
-        var word_it = std.mem.tokenize(u8, line, " \t");
         var word: []const u8 = undefined;
-    outer: while (true) {
-        word = word_it.next() orelse break;
-        for(cmp_words) |test_word,i| {
-            if(eql(u8,test_word,word)){
-                const tok = @intToEnum(Tok_enum,i + @enumToInt(Tok_enum.STRING_TYPE));
-                try token_list.append(Token{
-                .tok = switch(tok){ // if its a polish token, return an enum one place behind him which is the same one but not polish
-                            .IF_PL,.RETURN_PL,.WHILE_PL => @intToEnum(Tok_enum,i + @enumToInt(Tok_enum.STRING_TYPE) - 1),
-                            else => tok 
-                       }
-                });
-                continue :outer;
+        while(true){
+
+// Getting token and also skipping comments            
+            while (line_start < line.len and (line[line_start] == ' ' or line[line_start] == '\t')) : (line_start += 1) {}
+
+            if(line_start + 1 < line.len){
+                if(line[line_start] == 'c' and line[line_start+1] == '['){
+                    curr_state = .COMMENT;
+                    line_start += 2;
+                }
+                if(curr_state == .COMMENT){
+                    while(line_start < line.len and curr_state == .COMMENT) : (line_start += 1){
+                        if(line[line_start] == ']'){ curr_state = .NORMAL; if(line_start + 1 < line.len) line_start += 1; }
+                    }
+                }
             }
-        }
+            
+            const start = line_start;
+            if (start == line.len) { break; }
 
-        // TODO Check for operators and identifiers
-        try token_list.append(Token{.tok = .IDENTIFIER, .value = word});
+            while (line_start < line.len and !(line[line_start] == ' ' or line[line_start] == '\t')) : (line_start += 1) {}
+            const end = line_start;
 
+            word = line[start..end];
+// ----------------------------------------------------------------------------------------------------------------------------------
+
+// Check for keywords and stuff that are easy to find
+            outer: while (true) {
+                for(cmp_words) |test_word,i| {
+                    if(eql(u8,test_word,word)){
+                        const tok = @intToEnum(Tok_enum,i + @enumToInt(Tok_enum.STRING_TYPE));
+                        try token_list.append(Token{
+                        .tok = switch(tok){ // if its a polish token, return an enum one place behind him which is the same one but not polish
+                                    .IF_PL,.RETURN_PL,.WHILE_PL => @intToEnum(Tok_enum,i + @enumToInt(Tok_enum.STRING_TYPE) - 1),
+                                    else => tok
+                               }
+                        });
+                        break :outer;
+                    }
+                }
+                try token_list.append(Token{.tok = .IDENTIFIER, .value = try alloc.dupe(u8,word)});
+                break;
+            }
+// --------------------------------------------------------------------------------------------------------------------
+            
         }
         try token_list.append(Token{.tok = .NEWLINE});        
-// --------------------------------------------------------------------------------------------------------------------
     }
+    
 
     if(global_indent != 0){ // Recover from any scope left over at the end of the file
         while(global_indent > 0) : (global_indent -= 1) {
@@ -187,6 +251,13 @@ fn testTokens(tokens: []const Token, res:[]Token) !void {
     }
 }
 
+pub fn freeTokenValues(tokens : []const Token, alloc: std.mem.Allocator) !void {
+    for (tokens) |t|{
+        if(t.value != null){
+            alloc.free(t.value.?);
+        }
+    }
+}
 
 test "basic variable declaration" {
     const res = try tokenize("piwo int abcd = 10", test_alloc);
@@ -201,6 +272,7 @@ test "basic variable declaration" {
             .{.tok = .NEWLINE},
     };
     try testTokens(test1[0..],res);
+    try freeTokenValues(res,test_alloc);
 }
 
 test "basic variable assign" {
@@ -216,6 +288,7 @@ test "basic variable assign" {
     };
     
     try testTokens(test1[0..],res);
+    try freeTokenValues(res,test_alloc);
 }
 
 
@@ -231,6 +304,7 @@ test "basic indentation" {
     };
     
     try testTokens(test1[0..],res);
+    try freeTokenValues(res,test_alloc);
 }
 
 test "recovering from indentation" {
@@ -254,6 +328,7 @@ test "recovering from indentation" {
     };
     
     try testTokens(test1[0..],res);
+    try freeTokenValues(res,test_alloc);
 }
 
 test "leaving line empty with indentation" { 
@@ -275,9 +350,9 @@ test "leaving line empty with indentation" {
     };
     
     try testTokens(test1[0..],res);
+    try freeTokenValues(res,test_alloc);
 }
 
-// FIXME maybe find a better way to know if the token is polish, maybe translate it to normal token in future
 test "unicode polish letters working - 1" {
     const res = try tokenize("jeżeli", test_alloc);
     defer test_alloc.free(res); 
@@ -289,17 +364,39 @@ test "unicode polish letters working - 1" {
     };
     
     try testTokens(test1[0..],res);
+    try freeTokenValues(res,test_alloc);
 }
 
 test "unicode polish letters working - 2" {
-    const res = try tokenize("dopóki", test_alloc);
+    const res = try tokenize("zwróć", test_alloc);
     defer test_alloc.free(res); 
     errdefer std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
 
     const test1 = [_]Token{
-            .{.tok = .WHILE},
+            .{.tok = .RETURN},
             .{.tok = .NEWLINE},
     };
     
     try testTokens(test1[0..],res);
+    try freeTokenValues(res,test_alloc);
+}
+
+test "skipping comments" {
+    const source = \\c[Komentarz]
+                   \\    c[Comment]piwo
+                   \\piwo c[ fricking spaces ] piwo c[AAAAAAA]
+                   ;
+    const res = try tokenize(source, test_alloc);
+    defer test_alloc.free(res); 
+    errdefer std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
+
+    const test1 = [_]Token{
+            .{.tok = .INDENT},
+            .{.tok = .PIWO},.{.tok = .NEWLINE},
+            .{.tok = .DEDENT},
+            .{.tok = .PIWO},.{.tok = .PIWO},.{.tok = .NEWLINE},
+    };
+    
+    try testTokens(test1[0..],res);
+    try freeTokenValues(res,test_alloc);
 }
