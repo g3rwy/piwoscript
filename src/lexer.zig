@@ -21,19 +21,13 @@ pub const Tok_enum = enum(u8) {
     PIWO,
     KUFEL,
     WINO,
-    // Operators
-    EQUAL,
-    ADD,
-    SUB,
-    MUL,
-    DIV,
+    // other keywords
     IF,
     IF_PL,
     ELSE,
     FOREACH,
     WHILE,
     WHILE_PL,
-    ARROW,
     FUNC,
     RETURN,
     RETURN_PL,
@@ -41,10 +35,25 @@ pub const Tok_enum = enum(u8) {
     PRINT,
     CONT,
     BREAK,
+    EQUAL,                  // TODO same shit as vvv
     
     IDENTIFIER,
     INDENT,
-    DEDENT
+    DEDENT,
+    L_PAREN, // (
+    R_PAREN, // )
+
+    L_BRACK, // [
+    R_BRACK, // ]
+
+    L_CURLY, // {
+    R_CURLY, // }
+    // Operators
+    ADD,
+    SUB,
+    MUL,
+    DIV,
+    ARROW,    
 };
 
 const cmp_words = [_][]const u8{
@@ -57,25 +66,20 @@ const cmp_words = [_][]const u8{
     "piwo",
     "kufel",
     "wino",
-    "=",
-    "+",
-    "-",
-    "*",
-    "/",
     "jezeli",
     "jeżeli",
     "inaczej",
     "dla",
     "dopoki",
     "dopóki",
-    "->",
     "funkcja",
     "zwroc",
     "zwróć",
     "podaj",
     "wypisz",
     "dalej",
-    "przerwij"
+    "przerwij",
+    "=" // TODO get rid of it when checking for operators, this is just so tests doesn't break now
 };
 
 pub const Token = struct{tok : Tok_enum, value : ?[]const u8 = null};
@@ -83,6 +87,8 @@ const SPACE_INDENT = 4;
 
 const LexerError = error {
     InvalidIndentation,
+    UnclosedComment,
+    UnclosedString
 };
 
 const TokenizingState = enum{
@@ -161,7 +167,7 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
                         line_start += 2;
                         continue;
                     } else { break; }
-               }      else{ break; }
+            }  else{ break; }
         }
         // if line has nothing other than indentation, just ignore it lol
         if(line_start >= line.len or curr_state == .COMMENT) continue;
@@ -179,8 +185,24 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
 // -----------------------------------------------------------------------------------------------------
 
         var word: []const u8 = undefined;
+        var string_start : u32 = 0;
+        
         while(true){
-
+            // Do check for ending string in this line
+            if(curr_state == .STRING) {
+                while(line_start < line.len) : (line_start += 1){
+                    if(line[line_start] == '\"'){
+                          curr_state = .NORMAL;
+                          try token_list.append(Token{.tok = .STRING_LIT, .value = try alloc.dupe(u8,line[string_start..line_start])});
+                          line_start += 1;
+                          break; 
+                    }
+                }
+                if(curr_state == .STRING){ 
+                    for(token_list.items) |*t| { if(t.value != null) alloc.free(t.value.?); }
+                    return LexerError.UnclosedString;
+                }
+            }
 // Getting token and also skipping comments            
             while (line_start < line.len and (line[line_start] == ' ' or line[line_start] == '\t')) : (line_start += 1) {}
 
@@ -206,6 +228,7 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
 // ----------------------------------------------------------------------------------------------------------------------------------
 
 // Check for keywords and stuff that are easy to find
+            var found_keyword : bool = false;
             outer: while (true) {
                 for(cmp_words) |test_word,i| {
                     if(eql(u8,test_word,word)){
@@ -216,18 +239,65 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
                                     else => tok
                                }
                         });
+                        found_keyword = true;
                         break :outer;
                     }
                 }
-                try token_list.append(Token{.tok = .IDENTIFIER, .value = try alloc.dupe(u8,word)});
                 break;
             }
 // --------------------------------------------------------------------------------------------------------------------
+            if(found_keyword) continue; // continue getting other tokens in this line
+
+// Check for other stuff that might be cramped together, like operators, literals, parenthesis or whatever            
+            while(true){
+            var idx : u32 = 1;
+
             
-        }
+            if(word.len == 0) break;
+            if(word[0] >= '0' and word[0] <= '9'){ // Must be float or int
+                var int_or_float : bool = true;
+                while(idx < word.len) : (idx += 1){
+                    if(word[idx] == '.') { int_or_float = false; }
+                    else if (!(word[idx] >= '0' and word[idx] <= '9')){
+                        idx -= 1;
+                        break;
+                    }
+                }
+                
+                try token_list.append(Token{.tok = if(int_or_float) .INT_LIT else .FLOAT_LIT, .value = try alloc.dupe(u8,word[0..idx])} ); 
+                word.ptr += idx;
+                word.len -= idx;
+                continue; 
+            }
+            if(word[0] == '\"'){
+                // TODO support for \n \t \0
+                curr_state = .STRING;
+                while(idx < word.len) : (idx += 1){
+                    if(word[idx] == '\"') { break; }
+                }
+                if(idx == word.len) { string_start = start+1;break; } // Didn't found the end of string in current token, maybe its somewhere else in the line
+                try token_list.append(Token{.tok = .STRING_LIT, .value = try alloc.dupe(u8,word[1..idx])} ); 
+                word.ptr += idx + 1; // + 1 because of the starting \"
+                word.len -= idx + 1;
+                curr_state = .NORMAL;
+                continue;               
+            }
+
+            // Check for other stuff, like operators brackets and shit, remove this vvv
+            try token_list.append(Token{.tok = .IDENTIFIER, .value = try alloc.dupe(u8,word[0..])});
+            break;
+
+            }
+                        
+// ----------------------------------------------------------------------------------------------------------------------------
+            
+        } // End of the line 
         try token_list.append(Token{.tok = .NEWLINE});        
     }
-    
+    if(curr_state == .COMMENT){
+        for(token_list.items) |*t| { if(t.value != null) alloc.free(t.value.?); }
+        return LexerError.UnclosedComment;
+    }
 
     if(global_indent != 0){ // Recover from any scope left over at the end of the file
         while(global_indent > 0) : (global_indent -= 1) {
@@ -261,14 +331,14 @@ pub fn freeTokenValues(tokens : []const Token, alloc: std.mem.Allocator) !void {
 
 test "basic variable declaration" {
     const res = try tokenize("piwo int abcd = 10", test_alloc);
-    defer test_alloc.free(res); // TODO Change the unknowns to proper tokens
+    defer test_alloc.free(res);
     errdefer std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
     const test1 = [_]Token{ 
             .{.tok = .PIWO},
             .{.tok = .INT_TYPE}, 
             .{.tok = .IDENTIFIER, .value = "abcd"}, 
             .{.tok = .EQUAL}, 
-            .{.tok = .IDENTIFIER, .value = "10"},
+            .{.tok = .INT_LIT, .value = "10"},  
             .{.tok = .NEWLINE},
     };
     try testTokens(test1[0..],res);
@@ -277,13 +347,13 @@ test "basic variable declaration" {
 
 test "basic variable assign" {
     const res = try tokenize("abcd = 69.420", test_alloc);
-    defer test_alloc.free(res); // TODO Change the identifiers to proper tokens
+    defer test_alloc.free(res);
     errdefer std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
 
     const test1 = [_]Token{
             .{.tok = .IDENTIFIER, .value = "abcd"},
             .{.tok = .EQUAL},
-            .{.tok = .IDENTIFIER, .value = "69.420"},
+            .{.tok = .FLOAT_LIT, .value = "69.420"},
             .{.tok = .NEWLINE},
     };
     
@@ -331,7 +401,7 @@ test "recovering from indentation" {
     try freeTokenValues(res,test_alloc);
 }
 
-test "leaving line empty with indentation" { 
+test "ignoring line empty with indentation" { 
     const source = \\piwo
                    \\    piwo
                    \\    
@@ -417,4 +487,43 @@ test "multiline comments" {
     
     try testTokens(test1[0..],res);
     try freeTokenValues(res,test_alloc);
+}
+
+test "error unclosed comment" {
+    const source = \\c[ Oops i forgot to close it 
+                   \\
+                   \\piwo
+                   ;
+    
+    if(tokenize(source, test_alloc)) |res| {
+        _ = res;
+        unreachable;
+    } else |err| {
+        try expect(err == LexerError.UnclosedComment);
+    }
+}
+
+test "string literal" {
+    const res = try tokenize("piwo string abcd = \" foo abc \"", test_alloc);
+    defer test_alloc.free(res);
+    errdefer std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
+    const test1 = [_]Token{ 
+            .{.tok = .PIWO},
+            .{.tok = .STRING_TYPE}, 
+            .{.tok = .IDENTIFIER, .value = "abcd"}, 
+            .{.tok = .EQUAL}, 
+            .{.tok = .STRING_LIT, .value = " foo abc "},
+            .{.tok = .NEWLINE},
+    };
+    try testTokens(test1[0..],res);
+    try freeTokenValues(res,test_alloc);
+}
+
+test "error unclosed string" {
+    if(tokenize("piwo string abcd = \"foo bar spaces ", test_alloc)) |res| {
+        _ = res;
+        unreachable;
+    } else |err| {
+        try expect(err == LexerError.UnclosedString);
+    }
 }
