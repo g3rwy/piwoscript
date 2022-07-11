@@ -198,15 +198,13 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
                 while(line_start < line.len) : (line_start += 1){
                     if(line[line_start] == '\"'){
                           curr_state = .NORMAL;
-                        // \n \t \" 
                           var replaced :[]u8 = try alloc.dupe(u8,line[string_start..line_start]);
                           var changed : usize = undefined;
-                          changed = std.mem.replace(u8,line[string_start..line_start], "\\n", "\n", replaced);
-                          replaced.len -= changed;
-                          changed = std.mem.replace(u8,replaced, "\\t", "\t", replaced);
-                          replaced.len -= changed;
-                          changed = std.mem.replace(u8,replaced, "\\\"", "\"", replaced);
-                          replaced.len -= changed;
+
+                          changed = std.mem.replace(u8,line[string_start..line_start], "\\n", "\n", replaced); replaced.len -= changed;
+                          changed = std.mem.replace(u8,replaced, "\\t", "\t", replaced);                       replaced.len -= changed;
+                          changed = std.mem.replace(u8,replaced, "\\\"", "\"", replaced);                      replaced.len -= changed;
+
                           try token_list.append(Token{.tok = .STRING_LIT, .value = replaced});
                           line_start += 1;
                           break; 
@@ -298,7 +296,6 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
                 continue; 
             },
             '\"' => {
-                // TODO support for \n \t \0, make your own replace function
                 curr_state = .STRING;
                 while(idx < word.len) : (idx += 1){
                     if(word[idx] == '\"' and word[idx-1] != '\\') { break; }
@@ -318,6 +315,46 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
                 word.len -= idx + 1;
                 curr_state = .NORMAL;
                 continue;               
+            },
+            '\'' => {
+                
+                 if(idx + 1 < word.len){
+                    if(word[idx] == '\\'){ // some slash char
+                        idx += 1;
+                        var char : ?u8 = switch(word[idx]) {
+                            'n' => '\n',
+                            't' => '\t',
+                            '0' =>  0,
+                            '\\'=> '\\',
+                            else => null
+                        };
+                        if(char == null or word[idx+1] != '\''){
+                            for(token_list.items) |*t| { if(t.value != null) alloc.free(t.value.?); }
+                            return LexerError.IncorrectSlashChar;
+                        }
+                        
+                         try token_list.append(Token{.tok = .CHAR_LIT, .value =  try alloc.dupe(u8 ,&[1]u8{char.?}) });
+                         word.ptr += idx + 2; // + 2 because of some char and \'
+                         word.len -= idx + 2;
+                         continue;
+                    }
+                    else{
+                        if(word[idx + 1] == '\'') {
+                            try token_list.append(Token{.tok = .CHAR_LIT, .value = try alloc.dupe(u8 ,&[1]u8{word[1]}) });
+                            word.ptr += idx + 2;
+                            word.len -= idx + 2; 
+                            continue;
+                        }
+                        else{
+                            for(token_list.items) |*t| { if(t.value != null) alloc.free(t.value.?); }
+                            return LexerError.IncorrectSlashChar;   
+                        }              
+                    }
+                 }
+                 else{
+                    for(token_list.items) |*t| { if(t.value != null) alloc.free(t.value.?); }
+                    return LexerError.IncorrectSlashChar;
+                 }
             },
             else => {}
             }
@@ -580,4 +617,29 @@ test "string slashes support" {
     };
     try testTokens(test1[0..],res);
     try freeTokenValues(res,test_alloc);
+}
+
+test "char literals" {
+    const res = try tokenize("piwo char abcd = \'\\t\'", test_alloc);
+    defer test_alloc.free(res);
+    errdefer std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
+    const test1 = [_]Token{ 
+            .{.tok = .PIWO},
+            .{.tok = .CHAR_TYPE}, 
+            .{.tok = .IDENTIFIER, .value = "abcd"}, 
+            .{.tok = .EQUAL}, 
+            .{.tok = .CHAR_LIT, .value = "\t"},
+            .{.tok = .NEWLINE},
+    };
+    try testTokens(test1[0..],res);
+    try freeTokenValues(res,test_alloc);
+}
+
+test "error incorrect/unsupported char" {
+    if(tokenize("piwo char abcd = \'\\q\'", test_alloc)) |res| {
+        _ = res;
+        unreachable;
+    } else |err| {
+        try expect(err == LexerError.IncorrectSlashChar);
+    }
 }
