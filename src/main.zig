@@ -18,6 +18,7 @@ pub fn main() anyerror!void {
             if (i == 2) break;
         }
     // XXX for now i leave it like this so it doesn't cause a leak :P
+     try lex.freeTokenValues(tokens,alloc);
      alloc.free(tokens);
     } else {
         std.log.info("No file provided :/", .{});

@@ -35,11 +35,11 @@ pub const Tok_enum = enum(u8) {
     PRINT,
     CONT,
     BREAK,
-    EQUAL,                  // TODO same shit as vvv
     
     IDENTIFIER,
     INDENT,
     DEDENT,
+
     L_PAREN, // (
     R_PAREN, // )
 
@@ -49,6 +49,7 @@ pub const Tok_enum = enum(u8) {
     L_CURLY, // {
     R_CURLY, // }
     // Operators
+    EQUAL,
     ADD,
     SUB,
     MUL,
@@ -79,7 +80,10 @@ const cmp_words = [_][]const u8{
     "wypisz",
     "dalej",
     "przerwij",
-    "=" // TODO get rid of it when checking for operators, this is just so tests doesn't break now
+};
+
+const one_char_ops = [_]u8{
+    '(',')','[',']','{','}','=','+','-','*','/'
 };
 
 pub const Token = struct{tok : Tok_enum, value : ?[]const u8 = null};
@@ -88,7 +92,8 @@ const SPACE_INDENT = 4;
 const LexerError = error {
     InvalidIndentation,
     UnclosedComment,
-    UnclosedString
+    UnclosedString,
+    IncorrectSlashChar
 };
 
 const TokenizingState = enum{
@@ -193,7 +198,16 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
                 while(line_start < line.len) : (line_start += 1){
                     if(line[line_start] == '\"'){
                           curr_state = .NORMAL;
-                          try token_list.append(Token{.tok = .STRING_LIT, .value = try alloc.dupe(u8,line[string_start..line_start])});
+                        // \n \t \" 
+                          var replaced :[]u8 = try alloc.dupe(u8,line[string_start..line_start]);
+                          var changed : usize = undefined;
+                          changed = std.mem.replace(u8,line[string_start..line_start], "\\n", "\n", replaced);
+                          replaced.len -= changed;
+                          changed = std.mem.replace(u8,replaced, "\\t", "\t", replaced);
+                          replaced.len -= changed;
+                          changed = std.mem.replace(u8,replaced, "\\\"", "\"", replaced);
+                          replaced.len -= changed;
+                          try token_list.append(Token{.tok = .STRING_LIT, .value = replaced});
                           line_start += 1;
                           break; 
                     }
@@ -227,6 +241,19 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
             word = line[start..end];
 // ----------------------------------------------------------------------------------------------------------------------------------
 
+// Check for opetarors, quickly
+            if(word.len == 1){
+                var is_op : bool = false;
+                for(one_char_ops) |op,i| {
+                    if(word[0] == op){
+                         try token_list.append(Token{.tok = @intToEnum(Tok_enum,i + @enumToInt(Tok_enum.L_PAREN))});
+                         is_op = true;
+                         break;
+                    }
+                }
+                if(is_op) continue;
+            }
+// ------------------------------------------------------------------------------------
 // Check for keywords and stuff that are easy to find
             var found_keyword : bool = false;
             outer: while (true) {
@@ -254,7 +281,8 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
 
             
             if(word.len == 0) break;
-            if(word[0] >= '0' and word[0] <= '9'){ // Must be float or int
+            switch(word[0]){
+            '0'...'9' => { // Must be float or int
                 var int_or_float : bool = true;
                 while(idx < word.len) : (idx += 1){
                     if(word[idx] == '.') { int_or_float = false; }
@@ -268,21 +296,31 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
                 word.ptr += idx;
                 word.len -= idx;
                 continue; 
-            }
-            if(word[0] == '\"'){
-                // TODO support for \n \t \0
+            },
+            '\"' => {
+                // TODO support for \n \t \0, make your own replace function
                 curr_state = .STRING;
                 while(idx < word.len) : (idx += 1){
-                    if(word[idx] == '\"') { break; }
+                    if(word[idx] == '\"' and word[idx-1] != '\\') { break; }
                 }
                 if(idx == word.len) { string_start = start+1;break; } // Didn't found the end of string in current token, maybe its somewhere else in the line
-                try token_list.append(Token{.tok = .STRING_LIT, .value = try alloc.dupe(u8,word[1..idx])} ); 
+
+                var replaced : []u8 = try alloc.dupe(u8,word[1..idx]);
+                var changed : usize = undefined;
+
+                changed = std.mem.replace(u8,word[1..idx], "\\n", "\n", replaced);                   replaced.len -= changed;
+                changed = std.mem.replace(u8,replaced, "\\t", "\t", replaced);                       replaced.len -= changed;
+                changed = std.mem.replace(u8,replaced, "\\\"", "\"", replaced);                      replaced.len -= changed;
+                
+                try token_list.append(Token{.tok = .STRING_LIT, .value = replaced});
+
                 word.ptr += idx + 1; // + 1 because of the starting \"
                 word.len -= idx + 1;
                 curr_state = .NORMAL;
                 continue;               
+            },
+            else => {}
             }
-
             // Check for other stuff, like operators brackets and shit, remove this vvv
             try token_list.append(Token{.tok = .IDENTIFIER, .value = try alloc.dupe(u8,word[0..])});
             break;
@@ -504,7 +542,7 @@ test "error unclosed comment" {
 }
 
 test "string literal" {
-    const res = try tokenize("piwo string abcd = \" foo abc \"", test_alloc);
+    const res = try tokenize("piwo string abcd = \" foo abc\"", test_alloc);
     defer test_alloc.free(res);
     errdefer std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
     const test1 = [_]Token{ 
@@ -512,7 +550,7 @@ test "string literal" {
             .{.tok = .STRING_TYPE}, 
             .{.tok = .IDENTIFIER, .value = "abcd"}, 
             .{.tok = .EQUAL}, 
-            .{.tok = .STRING_LIT, .value = " foo abc "},
+            .{.tok = .STRING_LIT, .value = " foo abc"},
             .{.tok = .NEWLINE},
     };
     try testTokens(test1[0..],res);
@@ -526,4 +564,20 @@ test "error unclosed string" {
     } else |err| {
         try expect(err == LexerError.UnclosedString);
     }
+}
+
+test "string slashes support" {
+    const res = try tokenize("piwo string abcd = \"\\n\\t\\\"\"", test_alloc);
+    defer test_alloc.free(res);
+    errdefer std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
+    const test1 = [_]Token{ 
+            .{.tok = .PIWO},
+            .{.tok = .STRING_TYPE}, 
+            .{.tok = .IDENTIFIER, .value = "abcd"}, 
+            .{.tok = .EQUAL}, 
+            .{.tok = .STRING_LIT, .value = "\n\t\""},
+            .{.tok = .NEWLINE},
+    };
+    try testTokens(test1[0..],res);
+    try freeTokenValues(res,test_alloc);
 }
