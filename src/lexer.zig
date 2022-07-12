@@ -55,6 +55,8 @@ pub const Tok_enum = enum(u8) {
     MUL,
     DIV,
     NEG,
+    COLON,
+    COMMA,
     ARROW,    
 };
 // TODO albo, oraz operators
@@ -85,7 +87,7 @@ const cmp_words = [_][]const u8{
 };
 
 const one_char_ops = [_]u8{
-    '(',')','[',']','{','}','=','+','-','*','/','!'
+    '(',')','[',']','{','}','=','+','-','*','/','!',':',','
 };
 
 pub const Token = struct{tok : Tok_enum, value : ?[]const u8 = null};
@@ -109,6 +111,27 @@ fn readFileToString(path: []const u8, allocator: std.mem.Allocator) ![]u8 {
     defer file.close();
     const expected_max_size = 2_000_000;
     return try file.reader().readAllAlloc(allocator, expected_max_size);
+}
+
+fn checkIfKeyword(token_list: *ArrayList(Token), word: []const u8) !bool {
+        var found_keyword : bool = false;
+        while (true) {
+            for(cmp_words) |test_word,i| {
+                if(eql(u8,test_word,word)){
+                    const tok = @intToEnum(Tok_enum,i + @enumToInt(Tok_enum.STRING_TYPE));
+                    try token_list.*.append(Token{
+                    .tok = switch(tok){ // if its a polish token, return an enum one place behind him which is the same one but not polish
+                                .IF_PL,.RETURN_PL,.WHILE_PL => @intToEnum(Tok_enum,i + @enumToInt(Tok_enum.STRING_TYPE) - 1),
+                                else => tok
+                           }
+                    });
+                    found_keyword = true;
+                    break;
+                }
+            }
+            break;
+        }
+        return found_keyword;
 }
 
 pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
@@ -254,25 +277,8 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
             }
 // ------------------------------------------------------------------------------------
 // Check for keywords and stuff that are easy to find
-            var found_keyword : bool = false;
-            outer: while (true) {
-                for(cmp_words) |test_word,i| {
-                    if(eql(u8,test_word,word)){
-                        const tok = @intToEnum(Tok_enum,i + @enumToInt(Tok_enum.STRING_TYPE));
-                        try token_list.append(Token{
-                        .tok = switch(tok){ // if its a polish token, return an enum one place behind him which is the same one but not polish
-                                    .IF_PL,.RETURN_PL,.WHILE_PL => @intToEnum(Tok_enum,i + @enumToInt(Tok_enum.STRING_TYPE) - 1),
-                                    else => tok
-                               }
-                        });
-                        found_keyword = true;
-                        break :outer;
-                    }
-                }
-                break;
-            }
+            if(try checkIfKeyword(&token_list,word)) continue; // continue getting other tokens in this line if didn't found keyword
 // --------------------------------------------------------------------------------------------------------------------
-            if(found_keyword) continue; // continue getting other tokens in this line
 
 // Check for other stuff that might be cramped together, like operators, literals, parenthesis or whatever            
             while(true){
@@ -305,7 +311,6 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
 
                 var replaced : []u8 = try alloc.dupe(u8,word[1..idx]);
                 var changed : usize = undefined;
-
                 changed = std.mem.replace(u8,word[1..idx], "\\n", "\n", replaced);  replaced.len -= changed;
                 changed = std.mem.replace(u8,replaced, "\\t", "\t", replaced);      replaced.len -= changed;
                 changed = std.mem.replace(u8,replaced, "\\\"", "\"", replaced);     replaced.len -= changed;
@@ -351,8 +356,8 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
                  else{ return LexerError.IncorrectSlashChar; }
             },
             '-' => {
-                if(1 == word.len){
-                    try token_list.append(Token{.tok = .SUB}); break;
+                if(word.len == 2){ // stupid, since no one will leave arrow as last token, but well, i will leave it here
+                    if(word[idx] == '>') try token_list.append(Token{.tok = .ARROW}); break;
                 }
                 switch(word[idx]){
                     '0'...'9' => {
@@ -368,6 +373,11 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
                         word.ptr += idx;
                         word.len -= idx;
                         continue; 
+                    },
+                    '>' => {
+                        try token_list.append(Token{.tok = .ARROW});
+                        word.ptr += 2;
+                        word.len -= 2;
                     },
                     else => {
                         try token_list.append(Token{.tok = .SUB});
@@ -392,9 +402,26 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
             } // check if its len == 1 and check operators, if not, its identifier
             }
             // Check for other stuff, like operators brackets and shit in with what we are left off, remove this vvv
-            try token_list.append(Token{.tok = .IDENTIFIER, .value = try alloc.dupe(u8,word[0..])});
+            idx = 0;
+            var op_inside :bool = false;
+            for(word) |c,j| {
+                var op_found : ?usize = for(one_char_ops) |op,i| {
+                    if(c == op) break i;
+                }else null;
+                if(op_found != null){
+                    op_inside = true;
+                    // TODO check for keywords before adding identifier 
+                    if(idx != j) try token_list.append(Token{.tok = .IDENTIFIER, .value = try alloc.dupe(u8,word[idx..j])}); // FIXME, it is very sus, take a look later             
+                    try token_list.append(Token{.tok = @intToEnum(Tok_enum,op_found.? + @enumToInt(Tok_enum.L_PAREN))});
+                    idx += @intCast(u32,j+1);
+                    continue;
+                }
+                else{ op_inside = false; }
+            }
+            if(op_inside) break;
+            // TODO check for keywords before adding identifier, same as abovr
+            try token_list.append(Token{.tok = .IDENTIFIER, .value = try alloc.dupe(u8,word[idx..])});
             break;
-
             }
                         
 // ----------------------------------------------------------------------------------------------------------------------------
@@ -440,7 +467,10 @@ pub fn freeTokenValues(tokens : []const Token, alloc: std.mem.Allocator) !void {
 test "basic variable declaration" {
     const res = try tokenize("piwo int abcd = -10", test_alloc);
     defer test_alloc.free(res);
-    errdefer std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
+    errdefer {
+            std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
+            freeTokenValues(res,test_alloc) catch |err| {_ = err;};
+            }
     const test1 = [_]Token{ 
             .{.tok = .PIWO},
             .{.tok = .INT_TYPE}, 
@@ -456,8 +486,11 @@ test "basic variable declaration" {
 test "basic variable assign" {
     const res = try tokenize("abcd = 69.420", test_alloc);
     defer test_alloc.free(res);
-    errdefer std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
 
+    errdefer {
+            std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
+            freeTokenValues(res,test_alloc) catch |err| {_ = err;};
+            }
     const test1 = [_]Token{
             .{.tok = .IDENTIFIER, .value = "abcd"},
             .{.tok = .EQUAL},
@@ -473,7 +506,10 @@ test "basic variable assign" {
 test "basic indentation" {
     const res = try tokenize("\tpiwo", test_alloc);
     defer test_alloc.free(res); 
-    errdefer std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
+    errdefer {
+            std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
+            freeTokenValues(res,test_alloc) catch |err| {_ = err;};
+            }
 
     const test1 = [_]Token{
             .{.tok = .INDENT},
@@ -493,7 +529,10 @@ test "recovering from indentation" {
                    ;
     const res = try tokenize(source, test_alloc);
     defer test_alloc.free(res);
-    errdefer std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
+    errdefer {
+            std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
+            freeTokenValues(res,test_alloc) catch |err| {_ = err;};
+            }
 
     const test1 = [_]Token{
             .{.tok = .PIWO},.{.tok = .NEWLINE},
@@ -517,7 +556,10 @@ test "ignoring line empty with indentation" {
                    ;
     const res = try tokenize(source, test_alloc);
     defer test_alloc.free(res);
-    errdefer std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
+    errdefer {
+            std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
+            freeTokenValues(res,test_alloc) catch |err| {_ = err;};
+            }
 
     const test1 = [_]Token{
             .{.tok = .PIWO},.{.tok = .NEWLINE},
@@ -534,7 +576,10 @@ test "ignoring line empty with indentation" {
 test "unicode polish letters working - 1" {
     const res = try tokenize("jeżeli", test_alloc);
     defer test_alloc.free(res); 
-    errdefer std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
+    errdefer {
+            std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
+            freeTokenValues(res,test_alloc) catch |err| {_ = err;};
+            }
 
     const test1 = [_]Token{
             .{.tok = .IF},
@@ -548,7 +593,10 @@ test "unicode polish letters working - 1" {
 test "unicode polish letters working - 2" {
     const res = try tokenize("zwróć", test_alloc);
     defer test_alloc.free(res); 
-    errdefer std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
+    errdefer {
+            std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
+            freeTokenValues(res,test_alloc) catch |err| {_ = err;};
+            }
 
     const test1 = [_]Token{
             .{.tok = .RETURN},
@@ -566,7 +614,10 @@ test "skipping comments" {
                    ;
     const res = try tokenize(source, test_alloc);
     defer test_alloc.free(res); 
-    errdefer std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
+    errdefer {
+            std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
+            freeTokenValues(res,test_alloc) catch |err| {_ = err;};
+            }
 
     const test1 = [_]Token{
             .{.tok = .INDENT},
@@ -587,7 +638,10 @@ test "multiline comments" {
                    ;
     const res = try tokenize(source, test_alloc);
     defer test_alloc.free(res); 
-    errdefer std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
+    errdefer {
+            std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
+            freeTokenValues(res,test_alloc) catch |err| {_ = err;};
+            }
 
     const test1 = [_]Token{
             .{.tok = .PIWO},.{.tok = .NEWLINE},
@@ -614,7 +668,10 @@ test "error unclosed comment" {
 test "string literal" {
     const res = try tokenize("piwo string abcd = \" foo abc\"", test_alloc);
     defer test_alloc.free(res);
-    errdefer std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
+    errdefer {
+            std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
+            freeTokenValues(res,test_alloc) catch |err| {_ = err;};
+            }
     const test1 = [_]Token{ 
             .{.tok = .PIWO},
             .{.tok = .STRING_TYPE}, 
@@ -639,7 +696,10 @@ test "error unclosed string" {
 test "string slashes support" {
     const res = try tokenize("piwo string abcd = \"\\n\\t\\\"\"", test_alloc);
     defer test_alloc.free(res);
-    errdefer std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
+    errdefer {
+            std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
+            freeTokenValues(res,test_alloc) catch |err| {_ = err;};
+            }
     const test1 = [_]Token{ 
             .{.tok = .PIWO},
             .{.tok = .STRING_TYPE}, 
@@ -655,7 +715,10 @@ test "string slashes support" {
 test "char literals" {
     const res = try tokenize("piwo char abcd = \'\\t\'", test_alloc);
     defer test_alloc.free(res);
-    errdefer std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
+    errdefer {
+            std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
+            freeTokenValues(res,test_alloc) catch |err| {_ = err;};
+            }
     const test1 = [_]Token{ 
             .{.tok = .PIWO},
             .{.tok = .CHAR_TYPE}, 
@@ -675,4 +738,40 @@ test "error incorrect/unsupported char" {
     } else |err| {
         try expect(err == LexerError.IncorrectSlashChar);
     }
+}
+
+test "example code" {
+    // the code might not work, its just to test the tokenizer
+    // TODO 
+    // keywords merged with operators
+    const source = 
+    \\piwo int foo = 69 
+    \\wino float bar = 420.12
+    \\kufel string tab[] = {"69","b","c"}
+    \\jeżeli foo == tab[ 0 ]:
+    \\    wypisz "Equal\n" 
+    \\inaczej:
+    \\    podaj foo
+     ;
+    
+    const res = try tokenize(source, test_alloc);
+    defer test_alloc.free(res); 
+    errdefer {
+            std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
+            freeTokenValues(res,test_alloc) catch |err| {_ = err;};
+            }
+
+    const test1 = [_]Token{
+            .{.tok = .PIWO},.{.tok = .INT_TYPE}, .{.tok = .IDENTIFIER, .value = "foo"}, .{.tok = .EQUAL}, .{.tok = .INT_LIT, .value = "69"},.{.tok = .NEWLINE},
+            .{.tok = .WINO},.{.tok = .FLOAT_TYPE}, .{.tok = .IDENTIFIER, .value = "bar"}, .{.tok = .EQUAL}, .{.tok = .FLOAT_LIT, .value = "420.12"},.{.tok = .NEWLINE},
+            .{.tok = .KUFEL},.{.tok = .STRING_TYPE}, .{.tok = .IDENTIFIER, .value = "tab"}, .{.tok = .L_BRACK}, .{.tok = .R_BRACK} ,.{.tok = .EQUAL},.{.tok = .L_CURLY}, .{.tok = .STRING_LIT, .value = "69"},.{.tok = .COMMA},.{.tok = .STRING_LIT, .value = "b"},.{.tok = .COMMA},.{.tok = .STRING_LIT, .value = "c"},.{.tok = .R_CURLY},.{.tok = .NEWLINE},
+            .{.tok = .IF}, .{.tok = .IDENTIFIER, .value = "foo"}, .{.tok = .EQUAL}, .{.tok = .EQUAL}, .{.tok = .IDENTIFIER, .value = "tab"}, .{.tok = .L_BRACK}, .{.tok = .INT_LIT, .value = "0"}, .{.tok = .R_BRACK}, .{.tok = .COLON}, .{.tok = .NEWLINE},
+            .{.tok = .INDENT},.{.tok = .PRINT},.{.tok = .STRING_LIT, .value = "Equal\n"}, .{.tok = .NEWLINE},
+            .{.tok = .DEDENT},
+            .{.tok = .ELSE}, .{.tok = .COLON}, .{.tok = .NEWLINE},
+            .{.tok = .INDENT}, .{.tok = .INPUT}, .{.tok = .IDENTIFIER, .value = "foo"}, .{.tok = .NEWLINE}, .{.tok = .DEDENT}
+    };
+    
+    try testTokens(test1[0..],res);
+    try freeTokenValues(res,test_alloc);
 }
