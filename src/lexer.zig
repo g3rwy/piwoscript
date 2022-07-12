@@ -54,8 +54,10 @@ pub const Tok_enum = enum(u8) {
     SUB,
     MUL,
     DIV,
+    NEG,
     ARROW,    
 };
+// TODO albo, oraz operators
 
 const cmp_words = [_][]const u8{
     "string",
@@ -83,7 +85,7 @@ const cmp_words = [_][]const u8{
 };
 
 const one_char_ops = [_]u8{
-    '(',')','[',']','{','}','=','+','-','*','/'
+    '(',')','[',']','{','}','=','+','-','*','/','!'
 };
 
 pub const Token = struct{tok : Tok_enum, value : ?[]const u8 = null};
@@ -348,9 +350,48 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
                  }
                  else{ return LexerError.IncorrectSlashChar; }
             },
-            else => {}
+            '-' => {
+                if(1 == word.len){
+                    try token_list.append(Token{.tok = .SUB}); break;
+                }
+                switch(word[idx]){
+                    '0'...'9' => {
+                        var int_or_float : bool = true;
+                        while(idx < word.len) : (idx += 1){
+                            if(word[idx] == '.') { int_or_float = false; }
+                            else if (!(word[idx] >= '0' and word[idx] <= '9')){
+                                idx -= 1;
+                                break;
+                            }
+                        }
+                        try token_list.append(Token{.tok = if(int_or_float) .INT_LIT else .FLOAT_LIT, .value = try alloc.dupe(u8,word[0..idx])} ); 
+                        word.ptr += idx;
+                        word.len -= idx;
+                        continue; 
+                    },
+                    else => {
+                        try token_list.append(Token{.tok = .SUB});
+                        word.ptr += 1;
+                        word.len -= 1;
+                        continue;
+                    }
+                }
+            },
+            else => {
+                    var is_op : bool = false;
+                    for(one_char_ops) |op,i| {
+                    if(word[0] == op){
+                         try token_list.append(Token{.tok = @intToEnum(Tok_enum,i + @enumToInt(Tok_enum.L_PAREN))});
+                         is_op = true;
+                         word.ptr += 1;
+                         word.len -= 1;
+                         break;
+                    }
+                    }
+                    if(is_op) continue; // if operator is found, we continue
+            } // check if its len == 1 and check operators, if not, its identifier
             }
-            // Check for other stuff, like operators brackets and shit, remove this vvv
+            // Check for other stuff, like operators brackets and shit in with what we are left off, remove this vvv
             try token_list.append(Token{.tok = .IDENTIFIER, .value = try alloc.dupe(u8,word[0..])});
             break;
 
@@ -393,16 +434,19 @@ pub fn freeTokenValues(tokens : []const Token, alloc: std.mem.Allocator) !void {
     }
 }
 
+// FIXME TODO XXX operators are not detected when they are at the end or middle of token
+//                find a way to detect them inside token
+
 test "basic variable declaration" {
-    const res = try tokenize("piwo int abcd = 10", test_alloc);
+    const res = try tokenize("piwo int abcd = -10", test_alloc);
     defer test_alloc.free(res);
     errdefer std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
     const test1 = [_]Token{ 
             .{.tok = .PIWO},
             .{.tok = .INT_TYPE}, 
             .{.tok = .IDENTIFIER, .value = "abcd"}, 
-            .{.tok = .EQUAL}, 
-            .{.tok = .INT_LIT, .value = "10"},  
+            .{.tok = .EQUAL},
+            .{.tok = .INT_LIT, .value = "-10"},
             .{.tok = .NEWLINE},
     };
     try testTokens(test1[0..],res);
