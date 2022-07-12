@@ -112,11 +112,12 @@ fn readFileToString(path: []const u8, allocator: std.mem.Allocator) ![]u8 {
 pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
     var token_list = ArrayList(Token).init(alloc);
     defer token_list.deinit();
+    errdefer for(token_list.items) |*t| { if(t.value != null) alloc.free(t.value.?); };
     
     var curr_state = TokenizingState.NORMAL;
     var global_indent : u32 = 0;
 
-    var it = std.mem.tokenize(u8, buffer, "\n");
+    var it = std.mem.tokenize(u8, buffer, "\n\r");
     var line: []const u8 = undefined;
     
     while(true){
@@ -204,16 +205,14 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
                           changed = std.mem.replace(u8,line[string_start..line_start], "\\n", "\n", replaced); replaced.len -= changed;
                           changed = std.mem.replace(u8,replaced, "\\t", "\t", replaced);                       replaced.len -= changed;
                           changed = std.mem.replace(u8,replaced, "\\\"", "\"", replaced);                      replaced.len -= changed;
-
+                          changed = std.mem.replace(u8,replaced, "\\r", "\r", replaced);                       replaced.len -= changed;
+                          
                           try token_list.append(Token{.tok = .STRING_LIT, .value = replaced});
                           line_start += 1;
                           break; 
                     }
                 }
-                if(curr_state == .STRING){ 
-                    for(token_list.items) |*t| { if(t.value != null) alloc.free(t.value.?); }
-                    return LexerError.UnclosedString;
-                }
+                if(curr_state == .STRING){  return LexerError.UnclosedString; }
             }
 // Getting token and also skipping comments            
             while (line_start < line.len and (line[line_start] == ' ' or line[line_start] == '\t')) : (line_start += 1) {}
@@ -305,9 +304,10 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
                 var replaced : []u8 = try alloc.dupe(u8,word[1..idx]);
                 var changed : usize = undefined;
 
-                changed = std.mem.replace(u8,word[1..idx], "\\n", "\n", replaced);                   replaced.len -= changed;
-                changed = std.mem.replace(u8,replaced, "\\t", "\t", replaced);                       replaced.len -= changed;
-                changed = std.mem.replace(u8,replaced, "\\\"", "\"", replaced);                      replaced.len -= changed;
+                changed = std.mem.replace(u8,word[1..idx], "\\n", "\n", replaced);  replaced.len -= changed;
+                changed = std.mem.replace(u8,replaced, "\\t", "\t", replaced);      replaced.len -= changed;
+                changed = std.mem.replace(u8,replaced, "\\\"", "\"", replaced);     replaced.len -= changed;
+                changed = std.mem.replace(u8,replaced, "\\r", "\r", replaced);      replaced.len -= changed;
                 
                 try token_list.append(Token{.tok = .STRING_LIT, .value = replaced});
 
@@ -326,12 +326,10 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
                             't' => '\t',
                             '0' =>  0,
                             '\\'=> '\\',
+                            'r'=> '\r',
                             else => null
                         };
-                        if(char == null or word[idx+1] != '\''){
-                            for(token_list.items) |*t| { if(t.value != null) alloc.free(t.value.?); }
-                            return LexerError.IncorrectSlashChar;
-                        }
+                        if(char == null or word[idx+1] != '\''){ return LexerError.IncorrectSlashChar; }
                         
                          try token_list.append(Token{.tok = .CHAR_LIT, .value =  try alloc.dupe(u8 ,&[1]u8{char.?}) });
                          word.ptr += idx + 2; // + 2 because of some char and \'
@@ -345,16 +343,10 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
                             word.len -= idx + 2; 
                             continue;
                         }
-                        else{
-                            for(token_list.items) |*t| { if(t.value != null) alloc.free(t.value.?); }
-                            return LexerError.IncorrectSlashChar;   
-                        }              
+                        else{ return LexerError.IncorrectSlashChar; }              
                     }
                  }
-                 else{
-                    for(token_list.items) |*t| { if(t.value != null) alloc.free(t.value.?); }
-                    return LexerError.IncorrectSlashChar;
-                 }
+                 else{ return LexerError.IncorrectSlashChar; }
             },
             else => {}
             }
@@ -369,10 +361,7 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
         } // End of the line 
         try token_list.append(Token{.tok = .NEWLINE});        
     }
-    if(curr_state == .COMMENT){
-        for(token_list.items) |*t| { if(t.value != null) alloc.free(t.value.?); }
-        return LexerError.UnclosedComment;
-    }
+    if(curr_state == .COMMENT){ return LexerError.UnclosedComment; }
 
     if(global_indent != 0){ // Recover from any scope left over at the end of the file
         while(global_indent > 0) : (global_indent -= 1) {
