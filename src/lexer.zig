@@ -2,7 +2,6 @@ const std = @import("std");
 const ArrayList = std.ArrayList;
 
 pub const Tok_enum = enum(u8) {
-    UNKNOWN,
     NEWLINE,
     // Literals
     STRING_LIT,
@@ -66,31 +65,31 @@ pub const Tok_enum = enum(u8) {
 // TODO albo, oraz operators
 
 const cmp_words = [_][]const u8{
-    "string",
-    "int",
-    "char",
-    "float",
-    "bool",
-    "kurwa",
-    "piwo",
-    "kufel",
-    "wino",
-    "jezeli",
-    "jeżeli",
-    "inaczej",
-    "dla",
-    "dopoki",
-    "dopóki",
-    "funkcja",
-    "zwroc",
-    "zwróć",
-    "podaj",
-    "wypisz",
-    "dalej",
-    "przerwij",
-    "albo",
-    "oraz",
-    "tak","nie"
+"string",
+"int",
+"char",
+"float",
+"bool",
+"kurwa",
+"piwo",
+"kufel",
+"wino",
+"jezeli",
+"jeżeli",
+"inaczej",
+"dla",
+"dopoki",
+"dopóki",
+"funkcja",
+"zwroc",
+"zwróć",
+"podaj",
+"wypisz",
+"dalej",
+"przerwij",
+"albo",
+"oraz",
+"tak","nie"
 };
 
 const one_char_ops = [_]u8{
@@ -126,30 +125,27 @@ pub fn tokenizeFile(name: []const u8,alloc: std.mem.Allocator) ![]Token {
     return tokenize(buffer,alloc);
 }
 
-// TODO  maybe introduce SSE string comparison in future, for SPEEED
 fn checkIfKeyword(token_list: *ArrayList(Token), word: []const u8, alloc: std.mem.Allocator) !bool {
         var found_keyword : bool = false;
-        while (true) {
-            for(cmp_words) |test_word,i| {
+        for(cmp_words) |test_word,i| {
                 if(eql(u8,test_word,word)){
-                    const tok = @intToEnum(Tok_enum,i + @enumToInt(Tok_enum.STRING_TYPE));
+                    const tok = @intToEnum(Tok_enum , i + @enumToInt(Tok_enum.STRING_TYPE));
 
-                    if(tok == .TAK or tok == .NIE){
+                    if(tok == .TAK or tok == .NIE){ // Quick and dirty solution for boolean literals
                         try token_list.*.append(Token{.tok = .BOOL_LIT, .value = try alloc.dupe(u8,if(tok == .TAK) "t" else "n")});
                         found_keyword = true;
                         break;
                     }
+                    
                     try token_list.*.append(Token{
                     .tok = switch(tok){ // if its a polish token, return an enum one place behind him which is the same one but not polish
-                                .IF_PL,.RETURN_PL,.WHILE_PL => @intToEnum(Tok_enum,i + @enumToInt(Tok_enum.STRING_TYPE) - 1),
+                                .IF_PL,.RETURN_PL,.WHILE_PL => @intToEnum(Tok_enum , i + @enumToInt(Tok_enum.STRING_TYPE) - 1),
                                 else => tok
                            }
                     });
                     found_keyword = true;
                     break;
                 }
-            }
-            break;
         }
         return found_keyword;
 }
