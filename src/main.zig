@@ -13,14 +13,14 @@ pub fn main() anyerror!void {
     var tokens :[]lex.Token = undefined;
     if (argv.len > 1) {
         for (argv) |arg, i| { // No idea why, but this way its the safest so fuck it
-            if (i == 0) continue;
-            if (i == 1) tokens = try lex.tokenize(arg, alloc);
-            if (i == 2) break;
+            if (i == 1) tokens = try lex.tokenizeFile(arg, alloc);
         }
     // XXX for now i leave it like this so it doesn't cause a leak :P
+     try lex.printTokens(tokens);
      try lex.freeTokenValues(tokens,alloc);
      alloc.free(tokens);
     } else {
-        std.log.info("No file provided :/", .{});
+        const stdout = std.io.getStdOut().writer();
+        try stdout.print("No file provided :/\n", .{});
     }
 }

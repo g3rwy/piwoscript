@@ -60,6 +60,7 @@ pub const Tok_enum = enum(u8) {
     NEG,
     COLON,
     COMMA,
+    PERIOD,
     ARROW,
 };
 // TODO albo, oraz operators
@@ -93,7 +94,7 @@ const cmp_words = [_][]const u8{
 };
 
 const one_char_ops = [_]u8{
-    '(',')','[',']','{','}','=','+','-','*','/','!',':',','
+    '(',')','[',']','{','}','=','+','-','*','/','!',':',',','.'
 };
 
 pub const Token = struct{tok : Tok_enum, value : ?[]const u8 = null};
@@ -117,6 +118,12 @@ fn readFileToString(path: []const u8, allocator: std.mem.Allocator) ![]u8 {
     defer file.close();
     const expected_max_size = 2_000_000;
     return try file.reader().readAllAlloc(allocator, expected_max_size);
+}
+
+pub fn tokenizeFile(name: []const u8,alloc: std.mem.Allocator) ![]Token {
+    const buffer = try readFileToString(name, alloc);
+    defer alloc.free(buffer);
+    return tokenize(buffer,alloc);
 }
 
 // TODO  maybe introduce SSE string comparison in future, for SPEEED
@@ -145,6 +152,21 @@ fn checkIfKeyword(token_list: *ArrayList(Token), word: []const u8, alloc: std.me
             break;
         }
         return found_keyword;
+}
+
+pub fn printTokens(tokens: []Token) !void {
+    const stdout = std.io.getStdOut().writer();
+    for(tokens) |tok| {
+        if(tok.tok == .NEWLINE){
+            try stdout.print("|\n",.{});
+        } else {
+            if(tok.value == null){
+                try stdout.print(" {s} ", .{@tagName(tok.tok)});
+            } else {
+                try stdout.print(" ({s},{s}) ", .{@tagName(tok.tok), tok.value});                
+            } 
+        }        
+    }
 }
 
 pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
