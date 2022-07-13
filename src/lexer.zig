@@ -35,6 +35,8 @@ pub const Tok_enum = enum(u8) {
     PRINT,
     CONT,
     BREAK,
+    OR,
+    AND,
     
     IDENTIFIER,
     INDENT,
@@ -57,7 +59,7 @@ pub const Tok_enum = enum(u8) {
     NEG,
     COLON,
     COMMA,
-    ARROW,    
+    ARROW,
 };
 // TODO albo, oraz operators
 
@@ -84,6 +86,8 @@ const cmp_words = [_][]const u8{
     "wypisz",
     "dalej",
     "przerwij",
+    "albo",
+    "oraz"
 };
 
 const one_char_ops = [_]u8{
@@ -113,6 +117,7 @@ fn readFileToString(path: []const u8, allocator: std.mem.Allocator) ![]u8 {
     return try file.reader().readAllAlloc(allocator, expected_max_size);
 }
 
+// TODO  maybe introduce SSE string comparison in future, for SPEEED
 fn checkIfKeyword(token_list: *ArrayList(Token), word: []const u8) !bool {
         var found_keyword : bool = false;
         while (true) {
@@ -283,8 +288,6 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
 // Check for other stuff that might be cramped together, like operators, literals, parenthesis or whatever            
             while(true){
             var idx : u32 = 1;
-
-            
             if(word.len == 0) break;
             switch(word[0]){
             '0'...'9' => { // Must be float or int
@@ -292,11 +295,9 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
                 while(idx < word.len) : (idx += 1){
                     if(word[idx] == '.') { int_or_float = false; }
                     else if (!(word[idx] >= '0' and word[idx] <= '9')){
-                        idx -= 1;
                         break;
                     }
                 }
-                
                 try token_list.append(Token{.tok = if(int_or_float) .INT_LIT else .FLOAT_LIT, .value = try alloc.dupe(u8,word[0..idx])} ); 
                 word.ptr += idx;
                 word.len -= idx;
@@ -307,6 +308,7 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
                 while(idx < word.len) : (idx += 1){
                     if(word[idx] == '\"' and word[idx-1] != '\\') { break; }
                 }
+                
                 if(idx == word.len) { string_start = start+1;break; } // Didn't found the end of string in current token, maybe its somewhere else in the line
 
                 var replaced : []u8 = try alloc.dupe(u8,word[1..idx]);
@@ -387,7 +389,7 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
                     }
                 }
             },
-            else => {
+            else => { // no shit found in first letter, so we check if the first letter is operator
                     var is_op : bool = false;
                     for(one_char_ops) |op,i| {
                     if(word[0] == op){
@@ -399,30 +401,26 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
                     }
                     }
                     if(is_op) continue; // if operator is found, we continue
-            } // check if its len == 1 and check operators, if not, its identifier
+            } 
             }
-            // Check for other stuff, like operators brackets and shit in with what we are left off, remove this vvv
-            idx = 0;
-            var op_inside :bool = false;
-            for(word) |c,j| {
-                var op_found : ?usize = for(one_char_ops) |op,i| {
-                    if(c == op) break i;
-                }else null;
-                if(op_found != null){
-                    op_inside = true;
-                    // TODO check for keywords before adding identifier 
-                    if(idx != j) try token_list.append(Token{.tok = .IDENTIFIER, .value = try alloc.dupe(u8,word[idx..j])}); // FIXME, it is very sus, take a look later             
-                    try token_list.append(Token{.tok = @intToEnum(Tok_enum,op_found.? + @enumToInt(Tok_enum.L_PAREN))});
-                    idx += @intCast(u32,j+1);
-                    continue;
-                }
-                else{ op_inside = false; }
+            // If its not int/float, nor string, nor char nor starts with operator, we look for operator and append the word we found until operator
+            var op_found : bool = false;
+            op_search: for(word) |c,i| {
+                for(one_char_ops) |op| {
+                    if(c == op){
+                         if(!(try checkIfKeyword(&token_list,word[0..i]))) try token_list.append(Token{.tok = .IDENTIFIER, .value = try alloc.dupe(u8,word[0..i])});
+                         op_found = true;
+                         word.ptr += i;
+                         word.len -= i;
+                         break :op_search;
+                    }
             }
-            if(op_inside) break;
-            // TODO check for keywords before adding identifier, same as abovr
-            try token_list.append(Token{.tok = .IDENTIFIER, .value = try alloc.dupe(u8,word[idx..])});
+            }
+            if(op_found) continue; // if operator is found, we want to continue working on the word
+            if(!(try checkIfKeyword(&token_list,word[0..]))) try token_list.append(Token{.tok = .IDENTIFIER, .value = try alloc.dupe(u8,word[0..])});
             break;
-            }
+            // End of looking for stuff in one word
+        }
                         
 // ----------------------------------------------------------------------------------------------------------------------------
             
@@ -461,9 +459,6 @@ pub fn freeTokenValues(tokens : []const Token, alloc: std.mem.Allocator) !void {
     }
 }
 
-// FIXME TODO XXX operators are not detected when they are at the end or middle of token
-//                find a way to detect them inside token
-
 test "basic variable declaration" {
     const res = try tokenize("piwo int abcd = -10", test_alloc);
     defer test_alloc.free(res);
@@ -482,7 +477,6 @@ test "basic variable declaration" {
     try testTokens(test1[0..],res);
     try freeTokenValues(res,test_alloc);
 }
-
 test "basic variable assign" {
     const res = try tokenize("abcd = 69.420", test_alloc);
     defer test_alloc.free(res);
@@ -741,15 +735,12 @@ test "error incorrect/unsupported char" {
 }
 
 test "example code" {
-    // the code might not work, its just to test the tokenizer
-    // TODO 
-    // keywords merged with operators
     const source = 
     \\piwo int foo = 69 
     \\wino float bar = 420.12
     \\kufel string tab[] = {"69","b","c"}
-    \\jeżeli foo == tab[ 0 ]:
-    \\    wypisz "Equal\n" 
+    \\jeżeli foo == tab[0]:
+    \\    wypisz "Equal\n"
     \\inaczej:
     \\    podaj foo
      ;
