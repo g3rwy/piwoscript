@@ -37,6 +37,7 @@ pub const Tok_enum = enum(u8) {
     BREAK,
     OR,
     AND,
+    TAK,NIE, // Bool literals for true and false
     
     IDENTIFIER,
     INDENT,
@@ -87,7 +88,8 @@ const cmp_words = [_][]const u8{
     "dalej",
     "przerwij",
     "albo",
-    "oraz"
+    "oraz",
+    "tak","nie"
 };
 
 const one_char_ops = [_]u8{
@@ -118,12 +120,18 @@ fn readFileToString(path: []const u8, allocator: std.mem.Allocator) ![]u8 {
 }
 
 // TODO  maybe introduce SSE string comparison in future, for SPEEED
-fn checkIfKeyword(token_list: *ArrayList(Token), word: []const u8) !bool {
+fn checkIfKeyword(token_list: *ArrayList(Token), word: []const u8, alloc: std.mem.Allocator) !bool {
         var found_keyword : bool = false;
         while (true) {
             for(cmp_words) |test_word,i| {
                 if(eql(u8,test_word,word)){
                     const tok = @intToEnum(Tok_enum,i + @enumToInt(Tok_enum.STRING_TYPE));
+
+                    if(tok == .TAK or tok == .NIE){
+                        try token_list.*.append(Token{.tok = .BOOL_LIT, .value = try alloc.dupe(u8,if(tok == .TAK) "t" else "n")});
+                        found_keyword = true;
+                        break;
+                    }
                     try token_list.*.append(Token{
                     .tok = switch(tok){ // if its a polish token, return an enum one place behind him which is the same one but not polish
                                 .IF_PL,.RETURN_PL,.WHILE_PL => @intToEnum(Tok_enum,i + @enumToInt(Tok_enum.STRING_TYPE) - 1),
@@ -282,7 +290,7 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
             }
 // ------------------------------------------------------------------------------------
 // Check for keywords and stuff that are easy to find
-            if(try checkIfKeyword(&token_list,word)) continue; // continue getting other tokens in this line if didn't found keyword
+            if(try checkIfKeyword(&token_list,word,alloc)) continue; // continue getting other tokens in this line if didn't found keyword
 // --------------------------------------------------------------------------------------------------------------------
 
 // Check for other stuff that might be cramped together, like operators, literals, parenthesis or whatever            
@@ -401,23 +409,25 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
                     }
                     }
                     if(is_op) continue; // if operator is found, we continue
-            } 
-            }
+            } }
+            
             // If its not int/float, nor string, nor char nor starts with operator, we look for operator and append the word we found until operator
             var op_found : bool = false;
             op_search: for(word) |c,i| {
                 for(one_char_ops) |op| {
                     if(c == op){
-                         if(!(try checkIfKeyword(&token_list,word[0..i]))) try token_list.append(Token{.tok = .IDENTIFIER, .value = try alloc.dupe(u8,word[0..i])});
+                         if(!(try checkIfKeyword(&token_list,word[0..i],alloc)))
+                              try token_list.append(Token{.tok = .IDENTIFIER, .value = try alloc.dupe(u8,word[0..i])});
                          op_found = true;
                          word.ptr += i;
                          word.len -= i;
                          break :op_search;
                     }
-            }
-            }
+            } }
             if(op_found) continue; // if operator is found, we want to continue working on the word
-            if(!(try checkIfKeyword(&token_list,word[0..]))) try token_list.append(Token{.tok = .IDENTIFIER, .value = try alloc.dupe(u8,word[0..])});
+
+            if(!(try checkIfKeyword(&token_list,word[0..],alloc)))
+                 try token_list.append(Token{.tok = .IDENTIFIER, .value = try alloc.dupe(u8,word[0..])});
             break;
             // End of looking for stuff in one word
         }
