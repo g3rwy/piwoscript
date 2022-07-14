@@ -11,15 +11,15 @@ pub fn main() anyerror!void {
     const argv = try std.process.argsAlloc(alloc);
     _ = argv;
     defer std.process.argsFree(alloc, argv);
-    var tokens :[]lex.Token = undefined;
+    var AST : *parser.Node = undefined;
     if (argv.len > 1) {
         for (argv) |arg, i| { // No idea why, but this way its the safest so fuck it
-            if (i == 1) tokens = try lex.tokenizeFile(arg, alloc);
+            if (i == 1) AST = try parser.parseFile(arg, alloc);
         }
     // XXX for now i leave it like this so it doesn't cause a leak :P
-     try lex.printTokens(tokens);
-     try lex.freeTokenValues(tokens,alloc);
-     alloc.free(tokens);
+    try parser.printNodes(AST.*,0);
+    parser.freeNode(AST,alloc);
+    
     } else {
         const stdout = std.io.getStdOut().writer();
         try stdout.print("No file provided :/\n", .{});

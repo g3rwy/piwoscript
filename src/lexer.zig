@@ -1,5 +1,6 @@
 const std = @import("std");
 const ArrayList = std.ArrayList;
+const readFileToString = @import("utils.zig").readFileToString;
 
 pub const Tok_enum = enum(u8) {
     NEWLINE,
@@ -111,13 +112,6 @@ const TokenizingState = enum{
     COMMENT,
     STRING,
 };
-
-fn readFileToString(path: []const u8, allocator: std.mem.Allocator) ![]u8 {
-    const file = try std.fs.cwd().openFile(path, .{});
-    defer file.close();
-    const expected_max_size = 2_000_000;
-    return try file.reader().readAllAlloc(allocator, expected_max_size);
-}
 
 pub fn tokenizeFile(name: []const u8,alloc: std.mem.Allocator) ![]Token {
     const buffer = try readFileToString(name, alloc);
@@ -479,7 +473,7 @@ fn testTokens(tokens: []const Token, res:[]Token) !void {
     }
 }
 
-pub fn freeTokenValues(tokens : []const Token, alloc: std.mem.Allocator) !void {
+pub fn freeTokenValues(tokens : []const Token, alloc: std.mem.Allocator) void {
     for (tokens) |t|{
         if(t.value != null){
             alloc.free(t.value.?);
@@ -487,12 +481,12 @@ pub fn freeTokenValues(tokens : []const Token, alloc: std.mem.Allocator) !void {
     }
 }
 
-test "basic variable declaration" {
+test "lex basic variable declaration" {
     const res = try tokenize("piwo int abcd = -10", test_alloc);
     defer test_alloc.free(res);
     errdefer {
             std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
-            freeTokenValues(res,test_alloc) catch |err| {_ = err;};
+            freeTokenValues(res,test_alloc);
             }
     const test1 = [_]Token{ 
             .{.tok = .PIWO},
@@ -503,15 +497,15 @@ test "basic variable declaration" {
             .{.tok = .NEWLINE},
     };
     try testTokens(test1[0..],res);
-    try freeTokenValues(res,test_alloc);
+    freeTokenValues(res,test_alloc);
 }
-test "basic variable assign" {
+test "lex basic variable assign" {
     const res = try tokenize("abcd = 69.420", test_alloc);
     defer test_alloc.free(res);
 
     errdefer {
             std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
-            freeTokenValues(res,test_alloc) catch |err| {_ = err;};
+            freeTokenValues(res,test_alloc);
             }
     const test1 = [_]Token{
             .{.tok = .IDENTIFIER, .value = "abcd"},
@@ -521,16 +515,16 @@ test "basic variable assign" {
     };
     
     try testTokens(test1[0..],res);
-    try freeTokenValues(res,test_alloc);
+    freeTokenValues(res,test_alloc);
 }
 
 
-test "basic indentation" {
+test "lex basic indentation" {
     const res = try tokenize("\tpiwo", test_alloc);
     defer test_alloc.free(res); 
     errdefer {
             std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
-            freeTokenValues(res,test_alloc) catch |err| {_ = err;};
+            freeTokenValues(res,test_alloc);
             }
 
     const test1 = [_]Token{
@@ -540,10 +534,10 @@ test "basic indentation" {
     };
     
     try testTokens(test1[0..],res);
-    try freeTokenValues(res,test_alloc);
+    freeTokenValues(res,test_alloc);
 }
 
-test "recovering from indentation" {
+test "lex recovering from indentation" {
     const source = \\piwo
                    \\    piwo
                    \\        piwo
@@ -553,7 +547,7 @@ test "recovering from indentation" {
     defer test_alloc.free(res);
     errdefer {
             std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
-            freeTokenValues(res,test_alloc) catch |err| {_ = err;};
+            freeTokenValues(res,test_alloc);
             }
 
     const test1 = [_]Token{
@@ -567,10 +561,10 @@ test "recovering from indentation" {
     };
     
     try testTokens(test1[0..],res);
-    try freeTokenValues(res,test_alloc);
+    freeTokenValues(res,test_alloc);
 }
 
-test "ignoring line empty with indentation" { 
+test "lex ignoring line empty with indentation" { 
     const source = \\piwo
                    \\    piwo
                    \\    
@@ -580,7 +574,7 @@ test "ignoring line empty with indentation" {
     defer test_alloc.free(res);
     errdefer {
             std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
-            freeTokenValues(res,test_alloc) catch |err| {_ = err;};
+            freeTokenValues(res,test_alloc);
             }
 
     const test1 = [_]Token{
@@ -592,15 +586,15 @@ test "ignoring line empty with indentation" {
     };
     
     try testTokens(test1[0..],res);
-    try freeTokenValues(res,test_alloc);
+    freeTokenValues(res,test_alloc);
 }
 
-test "unicode polish letters working - 1" {
+test "lex unicode polish letters working - 1" {
     const res = try tokenize("jeżeli", test_alloc);
     defer test_alloc.free(res); 
     errdefer {
             std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
-            freeTokenValues(res,test_alloc) catch |err| {_ = err;};
+            freeTokenValues(res,test_alloc);
             }
 
     const test1 = [_]Token{
@@ -609,15 +603,15 @@ test "unicode polish letters working - 1" {
     };
     
     try testTokens(test1[0..],res);
-    try freeTokenValues(res,test_alloc);
+    freeTokenValues(res,test_alloc);
 }
 
-test "unicode polish letters working - 2" {
+test "lex unicode polish letters working - 2" {
     const res = try tokenize("zwróć", test_alloc);
     defer test_alloc.free(res); 
     errdefer {
             std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
-            freeTokenValues(res,test_alloc) catch |err| {_ = err;};
+            freeTokenValues(res,test_alloc);
             }
 
     const test1 = [_]Token{
@@ -626,10 +620,10 @@ test "unicode polish letters working - 2" {
     };
     
     try testTokens(test1[0..],res);
-    try freeTokenValues(res,test_alloc);
+    freeTokenValues(res,test_alloc);
 }
 
-test "skipping comments" {
+test "lex skipping comments" {
     const source = \\c[Komentarz]
                    \\    c[Comment]piwo
                    \\piwo c[ fricking spaces ] piwo c[AAAAAAA]
@@ -638,7 +632,7 @@ test "skipping comments" {
     defer test_alloc.free(res); 
     errdefer {
             std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
-            freeTokenValues(res,test_alloc) catch |err| {_ = err;};
+            freeTokenValues(res,test_alloc);
             }
 
     const test1 = [_]Token{
@@ -649,10 +643,10 @@ test "skipping comments" {
     };
     
     try testTokens(test1[0..],res);
-    try freeTokenValues(res,test_alloc);
+    freeTokenValues(res,test_alloc);
 }
 
-test "multiline comments" {
+test "lex multiline comments" {
     const source = \\c[
                    \\ Everything here is skipped
                    \\]
@@ -662,7 +656,7 @@ test "multiline comments" {
     defer test_alloc.free(res); 
     errdefer {
             std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
-            freeTokenValues(res,test_alloc) catch |err| {_ = err;};
+            freeTokenValues(res,test_alloc);
             }
 
     const test1 = [_]Token{
@@ -670,10 +664,10 @@ test "multiline comments" {
     };
     
     try testTokens(test1[0..],res);
-    try freeTokenValues(res,test_alloc);
+    freeTokenValues(res,test_alloc);
 }
 
-test "error unclosed comment" {
+test "lex error unclosed comment" {
     const source = \\c[ Oops i forgot to close it 
                    \\
                    \\piwo
@@ -687,12 +681,12 @@ test "error unclosed comment" {
     }
 }
 
-test "string literal" {
+test "lex string literal" {
     const res = try tokenize("piwo string abcd = \" foo abc\"", test_alloc);
     defer test_alloc.free(res);
     errdefer {
             std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
-            freeTokenValues(res,test_alloc) catch |err| {_ = err;};
+            freeTokenValues(res,test_alloc);
             }
     const test1 = [_]Token{ 
             .{.tok = .PIWO},
@@ -703,10 +697,10 @@ test "string literal" {
             .{.tok = .NEWLINE},
     };
     try testTokens(test1[0..],res);
-    try freeTokenValues(res,test_alloc);
+    freeTokenValues(res,test_alloc);
 }
 
-test "error unclosed string" {
+test "lex error unclosed string" {
     if(tokenize("piwo string abcd = \"foo bar spaces ", test_alloc)) |res| {
         _ = res;
         unreachable;
@@ -715,12 +709,12 @@ test "error unclosed string" {
     }
 }
 
-test "string slashes support" {
+test "lex string slashes support" {
     const res = try tokenize("piwo string abcd = \"\\n\\t\\\"\"", test_alloc);
     defer test_alloc.free(res);
     errdefer {
             std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
-            freeTokenValues(res,test_alloc) catch |err| {_ = err;};
+            freeTokenValues(res,test_alloc);
             }
     const test1 = [_]Token{ 
             .{.tok = .PIWO},
@@ -731,15 +725,15 @@ test "string slashes support" {
             .{.tok = .NEWLINE},
     };
     try testTokens(test1[0..],res);
-    try freeTokenValues(res,test_alloc);
+    freeTokenValues(res,test_alloc);
 }
 
-test "char literals" {
+test "lex char literals" {
     const res = try tokenize("piwo char abcd = \'\\t\'", test_alloc);
     defer test_alloc.free(res);
     errdefer {
             std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
-            freeTokenValues(res,test_alloc) catch |err| {_ = err;};
+            freeTokenValues(res,test_alloc);
             }
     const test1 = [_]Token{ 
             .{.tok = .PIWO},
@@ -750,10 +744,10 @@ test "char literals" {
             .{.tok = .NEWLINE},
     };
     try testTokens(test1[0..],res);
-    try freeTokenValues(res,test_alloc);
+    freeTokenValues(res,test_alloc);
 }
 
-test "error incorrect/unsupported char" {
+test "lex error incorrect/unsupported char" {
     if(tokenize("piwo char abcd = \'\\q\'", test_alloc)) |res| {
         _ = res;
         unreachable;
@@ -762,7 +756,7 @@ test "error incorrect/unsupported char" {
     }
 }
 
-test "example code" {
+test "lex example code" {
     const source = 
     \\piwo int foo = 69 
     \\wino float bar = 420.12
@@ -777,7 +771,7 @@ test "example code" {
     defer test_alloc.free(res); 
     errdefer {
             std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
-            freeTokenValues(res,test_alloc) catch |err| {_ = err;};
+            freeTokenValues(res,test_alloc);
             }
 
     const test1 = [_]Token{
@@ -792,5 +786,5 @@ test "example code" {
     };
     
     try testTokens(test1[0..],res);
-    try freeTokenValues(res,test_alloc);
+    freeTokenValues(res,test_alloc);
 }

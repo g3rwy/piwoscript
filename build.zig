@@ -29,12 +29,19 @@ pub fn build(b: *std.build.Builder) void {
 
     const exe_tests = b.addTest("src/main.zig");
     const lex_tests = b.addTest("src/lexer.zig");
+    const par_tests = b.addTest("src/parser.zig");
+    
     exe_tests.setTarget(target);
     exe_tests.setBuildMode(mode);
+
     lex_tests.setTarget(target);
     lex_tests.setBuildMode(mode);
 
+    par_tests.setTarget(target);
+    par_tests.setBuildMode(mode);
+    
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&exe_tests.step);
     test_step.dependOn(&lex_tests.step);
+    test_step.dependOn(&par_tests.step);
 }
