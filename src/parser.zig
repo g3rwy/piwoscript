@@ -8,7 +8,12 @@ const ArrayList = std.ArrayList;
 pub const NodeType = enum {
     PROGRAM, 
     STATEMENT,
-    EXPR, FACTOR, TERM, UNARY
+    
+    INT_LIT,FLOAT_LIT,STRING_LIT,CHAR_LIT,BOOL_LIT,
+    ADD,SUB,MUL,MOD,DIV,UNARY,AND,OR,ASSIGN,NEG,
+    EQUAL,N_EQUAL,MORE,LESS,MORE_E,LESS_E,
+    EXPR, FACTOR, TERM, UNARY,
+    ID,
 };
 
 pub const Node  = struct {
