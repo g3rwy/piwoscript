@@ -339,6 +339,7 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
                 changed = std.mem.replace(u8,replaced, "\\t", "\t", replaced);      replaced.len -= changed;
                 changed = std.mem.replace(u8,replaced, "\\\"", "\"", replaced);     replaced.len -= changed;
                 changed = std.mem.replace(u8,replaced, "\\r", "\r", replaced);      replaced.len -= changed;
+                changed = std.mem.replace(u8,replaced, "\\\'","\'",replaced);      replaced.len -= changed;
                 
                 try token_list.append(Token{.tok = .STRING_LIT, .value = replaced});
 
@@ -358,6 +359,11 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
                             '0' =>  0,
                             '\\'=> '\\',
                             'r'=> '\r',
+                            //'a'=> '\a',
+                            //'b'=> '\b',
+                            //'v'=> '\v',
+                            '\''=> '\'',
+                            '\"' => '\"',
                             else => null
                         };
                         if(char == null or word[idx+1] != '\''){ return LexerError.IncorrectSlashChar; }

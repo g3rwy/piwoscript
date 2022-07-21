@@ -10,16 +10,25 @@ pub const NodeType = enum {
     STATEMENT,
     
     INT_LIT,FLOAT_LIT,STRING_LIT,CHAR_LIT,BOOL_LIT,
-    ADD,SUB,MUL,MOD,DIV,UNARY,AND,OR,ASSIGN,NEG,
+    ADD,SUB,MUL,MOD,DIV,AND,OR,NEG,
     EQUAL,N_EQUAL,MORE,LESS,MORE_E,LESS_E,
-    EXPR, FACTOR, TERM, UNARY,
+
     ID,
+
+    IF,WHILE,PRINT,INPUT,FOREACH,
+    VAR_DECL,CONST_DECL,ARR_DECL,ASSIGN,
+    EXPR, FACTOR, TERM, UNARY,
+    EQUALITY,COMPARISON,
 };
 
 pub const Node  = struct {
       typ: NodeType,
       value: ?[]const u8 = null,
       children: ArrayList(Node)
+};
+
+pub const ParserError = error {
+    
 };
 
 pub fn parseFile(name: []const u8, alloc: std.mem.Allocator) !*Node {
@@ -87,9 +96,9 @@ pub fn printNodes(node: Node, deep: u8) std.os.WriteError!void {
 }
 
 
-test "par variable declaration" {
-    var tokens = try lex.tokenize("piwo int foo = -10", test_alloc);
-    var res : *Node = try parse(tokens, test_alloc);
+test "par expression" {
+    var tokens = try lex.tokenize("5 + 4", test_alloc);
+    var res = try parse(tokens, test_alloc);
     defer    freeAST(tokens,res,test_alloc);
     errdefer freeAST(tokens,res,test_alloc);
     
