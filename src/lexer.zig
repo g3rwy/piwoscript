@@ -42,7 +42,8 @@ pub const Tok_enum = enum(u8) {
     IDENTIFIER,
     INDENT,
     DEDENT,
-
+    
+    // Kinda operators but not really
     L_PAREN, // (
     R_PAREN, // )
 
@@ -51,8 +52,9 @@ pub const Tok_enum = enum(u8) {
 
     L_CURLY, // {
     R_CURLY, // }
+
     // Operators
-    EQUAL,
+    EQU,
     ADD,
     SUB,
     MUL,
@@ -61,8 +63,8 @@ pub const Tok_enum = enum(u8) {
     COLON,
     COMMA,
     PERIOD,
-    MODULO,
-    
+    MOD,
+    BIGGER,SMALLER,
     ARROW,
 };
 // TODO albo, oraz operators
@@ -96,7 +98,7 @@ const cmp_words = [_][]const u8{
 };
 
 const one_char_ops = [_]u8{
-    '(',')','[',']','{','}','=','+','-','*','/','!',':',',','.','%'
+    '(',')','[',']','{','}','=','+','-','*','/','!',':',',','.','%','>','<',
 };
 
 pub const Token = struct{tok : Tok_enum, value : ?[]const u8 = null};
@@ -500,7 +502,7 @@ test "lex basic variable declaration" {
             .{.tok = .PIWO},
             .{.tok = .INT_TYPE}, 
             .{.tok = .IDENTIFIER, .value = "abcd"}, 
-            .{.tok = .EQUAL},
+            .{.tok = .EQU},
             .{.tok = .INT_LIT, .value = "-10"},
             .{.tok = .NEWLINE},
     };
@@ -517,7 +519,7 @@ test "lex basic variable assign" {
             }
     const test1 = [_]Token{
             .{.tok = .IDENTIFIER, .value = "abcd"},
-            .{.tok = .EQUAL},
+            .{.tok = .EQU},
             .{.tok = .FLOAT_LIT, .value = "69.420"},
             .{.tok = .NEWLINE},
     };
@@ -700,7 +702,7 @@ test "lex string literal" {
             .{.tok = .PIWO},
             .{.tok = .STRING_TYPE}, 
             .{.tok = .IDENTIFIER, .value = "abcd"}, 
-            .{.tok = .EQUAL}, 
+            .{.tok = .EQU}, 
             .{.tok = .STRING_LIT, .value = " foo abc"},
             .{.tok = .NEWLINE},
     };
@@ -728,7 +730,7 @@ test "lex string slashes support" {
             .{.tok = .PIWO},
             .{.tok = .STRING_TYPE}, 
             .{.tok = .IDENTIFIER, .value = "abcd"}, 
-            .{.tok = .EQUAL}, 
+            .{.tok = .EQU}, 
             .{.tok = .STRING_LIT, .value = "\n\t\""},
             .{.tok = .NEWLINE},
     };
@@ -747,7 +749,7 @@ test "lex char literals" {
             .{.tok = .PIWO},
             .{.tok = .CHAR_TYPE}, 
             .{.tok = .IDENTIFIER, .value = "abcd"}, 
-            .{.tok = .EQUAL}, 
+            .{.tok = .EQU}, 
             .{.tok = .CHAR_LIT, .value = "\t"},
             .{.tok = .NEWLINE},
     };
@@ -783,10 +785,10 @@ test "lex example code" {
             }
 
     const test1 = [_]Token{
-            .{.tok = .PIWO},.{.tok = .INT_TYPE}, .{.tok = .IDENTIFIER, .value = "foo"}, .{.tok = .EQUAL}, .{.tok = .INT_LIT, .value = "69"},.{.tok = .NEWLINE},
-            .{.tok = .WINO},.{.tok = .FLOAT_TYPE}, .{.tok = .IDENTIFIER, .value = "bar"}, .{.tok = .EQUAL}, .{.tok = .FLOAT_LIT, .value = "420.12"},.{.tok = .NEWLINE},
-            .{.tok = .KUFEL},.{.tok = .STRING_TYPE}, .{.tok = .IDENTIFIER, .value = "tab"}, .{.tok = .L_BRACK}, .{.tok = .R_BRACK} ,.{.tok = .EQUAL},.{.tok = .L_CURLY}, .{.tok = .STRING_LIT, .value = "69"},.{.tok = .COMMA},.{.tok = .STRING_LIT, .value = "b"},.{.tok = .COMMA},.{.tok = .STRING_LIT, .value = "c"},.{.tok = .R_CURLY},.{.tok = .NEWLINE},
-            .{.tok = .IF}, .{.tok = .IDENTIFIER, .value = "foo"}, .{.tok = .EQUAL}, .{.tok = .EQUAL}, .{.tok = .IDENTIFIER, .value = "tab"}, .{.tok = .L_BRACK}, .{.tok = .INT_LIT, .value = "0"}, .{.tok = .R_BRACK}, .{.tok = .COLON}, .{.tok = .NEWLINE},
+            .{.tok = .PIWO},.{.tok = .INT_TYPE}, .{.tok = .IDENTIFIER, .value = "foo"}, .{.tok = .EQU}, .{.tok = .INT_LIT, .value = "69"},.{.tok = .NEWLINE},
+            .{.tok = .WINO},.{.tok = .FLOAT_TYPE}, .{.tok = .IDENTIFIER, .value = "bar"}, .{.tok = .EQU}, .{.tok = .FLOAT_LIT, .value = "420.12"},.{.tok = .NEWLINE},
+            .{.tok = .KUFEL},.{.tok = .STRING_TYPE}, .{.tok = .IDENTIFIER, .value = "tab"}, .{.tok = .L_BRACK}, .{.tok = .R_BRACK} ,.{.tok = .EQU},.{.tok = .L_CURLY}, .{.tok = .STRING_LIT, .value = "69"},.{.tok = .COMMA},.{.tok = .STRING_LIT, .value = "b"},.{.tok = .COMMA},.{.tok = .STRING_LIT, .value = "c"},.{.tok = .R_CURLY},.{.tok = .NEWLINE},
+            .{.tok = .IF}, .{.tok = .IDENTIFIER, .value = "foo"}, .{.tok = .EQU}, .{.tok = .EQU}, .{.tok = .IDENTIFIER, .value = "tab"}, .{.tok = .L_BRACK}, .{.tok = .INT_LIT, .value = "0"}, .{.tok = .R_BRACK}, .{.tok = .COLON}, .{.tok = .NEWLINE},
             .{.tok = .INDENT},.{.tok = .PRINT},.{.tok = .STRING_LIT, .value = "Equal\n"}, .{.tok = .NEWLINE},
             .{.tok = .DEDENT},
             .{.tok = .ELSE}, .{.tok = .COLON}, .{.tok = .NEWLINE},
