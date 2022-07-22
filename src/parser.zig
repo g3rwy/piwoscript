@@ -217,6 +217,5 @@ test "par expression" {
     var res    = try parse(tokens, test_alloc);
     defer    freeAST(tokens,res,test_alloc);
     errdefer freeAST(tokens,res,test_alloc);
-    std.debug.print("HERE???", .{});
     try printNodes(res.*,0);
 }
