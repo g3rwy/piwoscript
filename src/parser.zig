@@ -6,6 +6,8 @@ const Tok_enum = lex.Tok_enum;
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 
+// TODO debug why its working for different ops like + and * but not the ones in the same group like + and -
+
 pub const NodeType = enum {
     PROGRAM, 
     STATEMENT,
@@ -32,7 +34,8 @@ pub const ParserError = error {
     StringIntOperation,
     UndeclaredIdentifier,
     DivideByZero,
-    IncorrectEqualOp,    
+    IncorrectEqualOp,
+    UnclosedParenExpr,
 };
 
 pub fn parseFile(name: []const u8, alloc: Allocator) !*Node {
@@ -51,11 +54,7 @@ pub fn parseFile(name: []const u8, alloc: Allocator) !*Node {
 }
 
 // okay so this parsing doesn't really work
-fn atom(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, right: bool) !Node {
-    _=right;
-    // if(right)   {
-        // return and_or(alloc,idx,tok_list);
-    // }
+fn atom(alloc: Allocator, idx: *usize,tok_list: []const lex.Token) !Node {
     switch(tok_list[idx.*].tok){
         .BOOL_LIT,.STRING_LIT,.CHAR_LIT,.INT_LIT,.FLOAT_LIT => {
             // checking for literals
@@ -75,29 +74,35 @@ fn atom(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, right: bool) 
             // otherwise its just id
         },
         else => {
-            // if its nothing other, check for expression in parenthesis         
+            // if its nothing other, check for expression in parenthesis   
+            if(tok_list[idx.*].tok == Tok_enum.L_PAREN){
+                idx.* += 1;
+                const exp = try and_or(alloc,idx,tok_list,null);
+                // if it returns ParserError then its okay, since there should be expression here, if anything else then good too since we don't want errors
+                if(tok_list[idx.*].tok == Tok_enum.R_PAREN){ idx.* += 1;return exp; }
+                else{ return ParserError.UnclosedParenExpr; }
+            }   
         }
     }
     return ParserError.NotMatch;
 }
-// TODO for it to work, it needs to know if its on right side, so we gonna pass the bools
 
-fn unary(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, right: bool) !Node {
+fn unary(alloc: Allocator, idx: *usize,tok_list: []const lex.Token) !Node {
     const symbol : ?Tok_enum = if(tok_list[idx.*].tok == Tok_enum.NOT or tok_list[idx.*].tok == Tok_enum.SUB) tok_list[idx.*].tok else null;
     if(symbol == null){ // if no symbol at front, then it must be atom
-        return atom(alloc,idx,tok_list,right);
+        return atom(alloc,idx,tok_list);
     }
     else{
         var un = Node{.typ = if(symbol == Tok_enum.NOT) .NOT else .NEG,.children = ArrayList(Node).init(alloc)};
         idx.* += 1;
-        try un.children.append(try atom(alloc,idx,tok_list,right));
+        try un.children.append(try atom(alloc,idx,tok_list));
         return un;
     }
     return ParserError.NotMatch;
 }
 
-fn factor(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, right: bool) !Node {
-    const lhs = try unary(alloc,idx,tok_list,right);
+fn factor(alloc: Allocator, idx: *usize,tok_list: []const lex.Token) !Node {
+    const lhs = try unary(alloc,idx,tok_list);
     // XXX use switch instead of if?
     const next_tok : ?Tok_enum = switch(tok_list[idx.*].tok){
         Tok_enum.DIV,Tok_enum.MUL,Tok_enum.MOD => tok_list[idx.*].tok,
@@ -115,19 +120,18 @@ fn factor(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, right: bool
         } ,.children = ArrayList(Node).init(alloc)};
 
         idx.* += 1;
-        const rhs = try unary(alloc,idx,tok_list,true);
+        const rhs = try unary(alloc,idx,tok_list);
         try fact.children.append(lhs);
         try fact.children.append(rhs);
 
         return fact;
     }
-    _= right;
 
     return ParserError.NotMatch;
 }
 
-fn term(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, right: bool) !Node {
-    const lhs = try factor(alloc,idx,tok_list,right);
+fn term(alloc: Allocator, idx: *usize,tok_list: []const lex.Token) !Node {
+    const lhs = try factor(alloc,idx,tok_list);
     const next_tok : ?Tok_enum = if(tok_list[idx.*].tok == Tok_enum.ADD or tok_list[idx.*].tok == Tok_enum.SUB) tok_list[idx.*].tok else null;
     
     // no operator found after it
@@ -135,18 +139,17 @@ fn term(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, right: bool) 
     else{
         var ter = Node{.typ = if(next_tok.? == Tok_enum.ADD) .ADD else .SUB ,.children = ArrayList(Node).init(alloc)};
         idx.* += 1;
-        const rhs = try factor(alloc,idx,tok_list,true);
+        const rhs = try factor(alloc,idx,tok_list);
         try ter.children.append(lhs);
         try ter.children.append(rhs);
 
         return ter;
     }
-    _= right;
     return ParserError.NotMatch;
 }
 
-fn comparison(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, right: bool) !Node {
-    const lhs = try term(alloc,idx,tok_list,right);
+fn comparison(alloc: Allocator, idx: *usize,tok_list: []const lex.Token) !Node {
+    const lhs = try term(alloc,idx,tok_list);
     const next_tok : ?Tok_enum = if(tok_list[idx.*].tok == .BIGGER or tok_list[idx.*].tok == .SMALLER) tok_list[idx.*].tok else null;
 
     // no operator found after it
@@ -162,18 +165,17 @@ fn comparison(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, right: 
             idx.* += 1;
         }
 
-        const rhs = try term(alloc,idx,tok_list,true);
+        const rhs = try term(alloc,idx,tok_list);
         try comp.children.append(lhs);
         try comp.children.append(rhs);
-        
+
         return comp;
     }
-    _= right;
     return ParserError.NotMatch;
 }
 
-fn equality(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, right: bool) !Node {
-    const lhs = try comparison(alloc,idx,tok_list,right);
+fn equality(alloc: Allocator, idx: *usize,tok_list: []const lex.Token) !Node {
+    const lhs = try comparison(alloc,idx,tok_list);
     const next_tok : ?Tok_enum = if(tok_list[idx.*].tok == .EQU or tok_list[idx.*].tok == Tok_enum.NOT) tok_list[idx.*].tok else null;
 
     // no operator found after it
@@ -184,23 +186,21 @@ fn equality(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, right: bo
             var logic = Node{.typ = if(next_tok.? == .EQU) .EQUAL else .N_EQUAL ,.children = ArrayList(Node).init(alloc)};
             idx.* += 2;
             
-            const rhs = try comparison(alloc,idx,tok_list,true);
+            const rhs = try comparison(alloc,idx,tok_list);
             try logic.children.append(lhs);
             try logic.children.append(rhs);
-            
+
             return logic;
         }
         else{ return ParserError.IncorrectEqualOp; }
     }
-    _= right;
     return ParserError.NotMatch;
 } 
 
 fn and_or(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, lh: ?Node) anyerror!Node {
     var lhs : Node = undefined;
-    if(lh == null) { lhs = try equality(alloc,idx,tok_list,false); }
+    if(lh == null) { lhs = try equality(alloc,idx,tok_list); }
     else { lhs = lh.?; }
-    
     const next_tok : ?Tok_enum = if(tok_list[idx.*].tok == Tok_enum.AND or tok_list[idx.*].tok == Tok_enum.OR) tok_list[idx.*].tok else null;
 
     // no operator found after it
@@ -212,10 +212,9 @@ fn and_or(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, lh: ?Node) 
         var andor = Node{.typ = if(next_tok.? == Tok_enum.AND) .AND else .OR ,.children = ArrayList(Node).init(alloc)};
         idx.* += 1;
         
-        const rhs = try equality(alloc,idx,tok_list,true);
+        const rhs = try equality(alloc,idx,tok_list);
         try andor.children.append(lhs);
         try andor.children.append(rhs);
-
         const op = @enumToInt(tok_list[idx.*].tok);
         // we check for operators after expression ( by range and also AND and OR keywords)
         // if operator is found, we know we gotta go further so we pass the expression as our left side and do everything again
@@ -223,7 +222,7 @@ fn and_or(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, lh: ?Node) 
          or op == @enumToInt(Tok_enum.AND) or  op == @enumToInt(Tok_enum.OR))
         { return and_or(alloc,idx,tok_list,andor); }
         // no operator, then just return this expression
-        else{ return andor; }
+        return andor;
     }
     return ParserError.NotMatch;
 }
@@ -287,7 +286,7 @@ const expect = std.testing.expect;
 const test_alloc = std.testing.allocator;
 
 test "par expression" {
-    var tokens = try lex.tokenize("6 / 3 - 1 == 1 oraz 4 * 2 + 1", test_alloc);
+    var tokens = try lex.tokenize("2 + 3 + 1", test_alloc);
     var res    = try parse(tokens, test_alloc);
     defer    freeAST(tokens,res,test_alloc);
     errdefer freeAST(tokens,res,test_alloc);
