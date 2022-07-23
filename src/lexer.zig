@@ -60,11 +60,11 @@ pub const Tok_enum = enum(u8) {
     MUL,
     DIV,
     NOT,
+    BIGGER,SMALLER,
+    MOD,
     COLON,
     COMMA,
     PERIOD,
-    MOD,
-    BIGGER,SMALLER,
     ARROW,
 };
 // TODO albo, oraz operators
@@ -98,7 +98,7 @@ const cmp_words = [_][]const u8{
 };
 
 const one_char_ops = [_]u8{
-    '(',')','[',']','{','}','=','+','-','*','/','!',':',',','.','%','>','<',
+    '(',')','[',']','{','}','=','+','-','*','/','!','>','<','%',':',',','.',
 };
 
 pub const Token = struct{tok : Tok_enum, value : ?[]const u8 = null};
