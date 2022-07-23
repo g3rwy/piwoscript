@@ -59,7 +59,7 @@ pub const Tok_enum = enum(u8) {
     SUB,
     MUL,
     DIV,
-    NEG,
+    NOT,
     COLON,
     COMMA,
     PERIOD,
