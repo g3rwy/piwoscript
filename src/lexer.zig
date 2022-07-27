@@ -1,7 +1,7 @@
 const std = @import("std");
 const ArrayList = std.ArrayList;
 const readFileToString = @import("utils.zig").readFileToString;
-
+// TODO Struct stuff
 pub const Tok_enum = enum(u8) {
     NEWLINE,
     // Literals

@@ -19,7 +19,6 @@ pub fn main() anyerror!void {
     // XXX for now i leave it like this so it doesn't cause a leak :P
     try parser.printNodes(AST.*,0);
     parser.freeNode(AST,alloc);
-    
     } else {
         const stdout = std.io.getStdOut().writer();
         try stdout.print("No file provided :/\n", .{});
