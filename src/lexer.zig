@@ -1,7 +1,7 @@
 const std = @import("std");
 const ArrayList = std.ArrayList;
 const readFileToString = @import("utils.zig").readFileToString;
-// TODO Struct stuff
+
 pub const Tok_enum = enum(u8) {
     NEWLINE,
     // Literals
@@ -21,6 +21,7 @@ pub const Tok_enum = enum(u8) {
     PIWO,
     KUFEL,
     WINO,
+    BECZKA,
     // other keywords
     IF,
     IF_PL,
@@ -79,6 +80,7 @@ const cmp_words = [_][]const u8{
 "piwo",
 "kufel",
 "wino",
+"beczka",
 "jezeli",
 "jeżeli",
 "inaczej",
@@ -397,7 +399,8 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
                         while(idx < word.len) : (idx += 1){
                             if(word[idx] == '.') { int_or_float = false; }
                             else if (!(word[idx] >= '0' and word[idx] <= '9')){
-                                idx -= 1;
+                                //FIXME ?
+                                // idx -= 1;
                                 break;
                             }
                         }
@@ -483,8 +486,9 @@ fn testTokens(tokens: []const Token, res:[]Token) !void {
     }
 }
 
-pub fn freeTokenValues(tokens : []const Token, alloc: std.mem.Allocator) void {
-    for (tokens) |t|{
+pub fn freeTokenValues(tokens : []const Token, alloc: std.mem.Allocator, off: usize) void {
+    for (tokens) |t,i|{
+        if(i < off) continue;
         if(t.value != null){
             alloc.free(t.value.?);
         }
@@ -496,7 +500,7 @@ test "lex basic variable declaration" {
     defer test_alloc.free(res);
     errdefer {
             std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
-            freeTokenValues(res,test_alloc);
+            freeTokenValues(res,test_alloc,0);
             }
     const test1 = [_]Token{ 
             .{.tok = .PIWO},
@@ -507,7 +511,7 @@ test "lex basic variable declaration" {
             .{.tok = .NEWLINE},
     };
     try testTokens(test1[0..],res);
-    freeTokenValues(res,test_alloc);
+    freeTokenValues(res,test_alloc,0);
 }
 test "lex basic variable assign" {
     const res = try tokenize("abcd = 69.420", test_alloc);
@@ -515,7 +519,7 @@ test "lex basic variable assign" {
 
     errdefer {
             std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
-            freeTokenValues(res,test_alloc);
+            freeTokenValues(res,test_alloc,0);
             }
     const test1 = [_]Token{
             .{.tok = .IDENTIFIER, .value = "abcd"},
@@ -525,7 +529,7 @@ test "lex basic variable assign" {
     };
     
     try testTokens(test1[0..],res);
-    freeTokenValues(res,test_alloc);
+    freeTokenValues(res,test_alloc,0);
 }
 
 
@@ -534,7 +538,7 @@ test "lex basic indentation" {
     defer test_alloc.free(res); 
     errdefer {
             std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
-            freeTokenValues(res,test_alloc);
+            freeTokenValues(res,test_alloc,0);
             }
 
     const test1 = [_]Token{
@@ -544,7 +548,7 @@ test "lex basic indentation" {
     };
     
     try testTokens(test1[0..],res);
-    freeTokenValues(res,test_alloc);
+    freeTokenValues(res,test_alloc,0);
 }
 
 test "lex recovering from indentation" {
@@ -557,7 +561,7 @@ test "lex recovering from indentation" {
     defer test_alloc.free(res);
     errdefer {
             std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
-            freeTokenValues(res,test_alloc);
+            freeTokenValues(res,test_alloc,0);
             }
 
     const test1 = [_]Token{
@@ -571,7 +575,7 @@ test "lex recovering from indentation" {
     };
     
     try testTokens(test1[0..],res);
-    freeTokenValues(res,test_alloc);
+    freeTokenValues(res,test_alloc,0);
 }
 
 test "lex ignoring line empty with indentation" { 
@@ -584,7 +588,7 @@ test "lex ignoring line empty with indentation" {
     defer test_alloc.free(res);
     errdefer {
             std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
-            freeTokenValues(res,test_alloc);
+            freeTokenValues(res,test_alloc,0);
             }
 
     const test1 = [_]Token{
@@ -596,7 +600,7 @@ test "lex ignoring line empty with indentation" {
     };
     
     try testTokens(test1[0..],res);
-    freeTokenValues(res,test_alloc);
+    freeTokenValues(res,test_alloc,0);
 }
 
 test "lex unicode polish letters working - 1" {
@@ -604,7 +608,7 @@ test "lex unicode polish letters working - 1" {
     defer test_alloc.free(res); 
     errdefer {
             std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
-            freeTokenValues(res,test_alloc);
+            freeTokenValues(res,test_alloc,0);
             }
 
     const test1 = [_]Token{
@@ -613,7 +617,7 @@ test "lex unicode polish letters working - 1" {
     };
     
     try testTokens(test1[0..],res);
-    freeTokenValues(res,test_alloc);
+    freeTokenValues(res,test_alloc,0);
 }
 
 test "lex unicode polish letters working - 2" {
@@ -621,7 +625,7 @@ test "lex unicode polish letters working - 2" {
     defer test_alloc.free(res); 
     errdefer {
             std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
-            freeTokenValues(res,test_alloc);
+            freeTokenValues(res,test_alloc,0);
             }
 
     const test1 = [_]Token{
@@ -630,7 +634,7 @@ test "lex unicode polish letters working - 2" {
     };
     
     try testTokens(test1[0..],res);
-    freeTokenValues(res,test_alloc);
+    freeTokenValues(res,test_alloc,0);
 }
 
 test "lex skipping comments" {
@@ -642,7 +646,7 @@ test "lex skipping comments" {
     defer test_alloc.free(res); 
     errdefer {
             std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
-            freeTokenValues(res,test_alloc);
+            freeTokenValues(res,test_alloc,0);
             }
 
     const test1 = [_]Token{
@@ -653,7 +657,7 @@ test "lex skipping comments" {
     };
     
     try testTokens(test1[0..],res);
-    freeTokenValues(res,test_alloc);
+    freeTokenValues(res,test_alloc,0);
 }
 
 test "lex multiline comments" {
@@ -666,7 +670,7 @@ test "lex multiline comments" {
     defer test_alloc.free(res); 
     errdefer {
             std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
-            freeTokenValues(res,test_alloc);
+            freeTokenValues(res,test_alloc,0);
             }
 
     const test1 = [_]Token{
@@ -674,7 +678,7 @@ test "lex multiline comments" {
     };
     
     try testTokens(test1[0..],res);
-    freeTokenValues(res,test_alloc);
+    freeTokenValues(res,test_alloc,0);
 }
 
 test "lex error unclosed comment" {
@@ -696,7 +700,7 @@ test "lex string literal" {
     defer test_alloc.free(res);
     errdefer {
             std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
-            freeTokenValues(res,test_alloc);
+            freeTokenValues(res,test_alloc,0);
             }
     const test1 = [_]Token{ 
             .{.tok = .PIWO},
@@ -707,7 +711,7 @@ test "lex string literal" {
             .{.tok = .NEWLINE},
     };
     try testTokens(test1[0..],res);
-    freeTokenValues(res,test_alloc);
+    freeTokenValues(res,test_alloc,0);
 }
 
 test "lex error unclosed string" {
@@ -724,7 +728,7 @@ test "lex string slashes support" {
     defer test_alloc.free(res);
     errdefer {
             std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
-            freeTokenValues(res,test_alloc);
+            freeTokenValues(res,test_alloc,0);
             }
     const test1 = [_]Token{ 
             .{.tok = .PIWO},
@@ -735,7 +739,7 @@ test "lex string slashes support" {
             .{.tok = .NEWLINE},
     };
     try testTokens(test1[0..],res);
-    freeTokenValues(res,test_alloc);
+    freeTokenValues(res,test_alloc,0);
 }
 
 test "lex char literals" {
@@ -743,7 +747,7 @@ test "lex char literals" {
     defer test_alloc.free(res);
     errdefer {
             std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
-            freeTokenValues(res,test_alloc);
+            freeTokenValues(res,test_alloc,0);
             }
     const test1 = [_]Token{ 
             .{.tok = .PIWO},
@@ -754,7 +758,7 @@ test "lex char literals" {
             .{.tok = .NEWLINE},
     };
     try testTokens(test1[0..],res);
-    freeTokenValues(res,test_alloc);
+    freeTokenValues(res,test_alloc,0);
 }
 
 test "lex error incorrect/unsupported char" {
@@ -781,7 +785,7 @@ test "lex example code" {
     defer test_alloc.free(res); 
     errdefer {
             std.debug.print("\n==========================\n!!!RESULT: {s}\n==========================\n", .{res});
-            freeTokenValues(res,test_alloc);
+            freeTokenValues(res,test_alloc,0);
             }
 
     const test1 = [_]Token{
@@ -796,5 +800,5 @@ test "lex example code" {
     };
     
     try testTokens(test1[0..],res);
-    freeTokenValues(res,test_alloc);
+    freeTokenValues(res,test_alloc,0);
 }

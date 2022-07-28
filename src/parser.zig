@@ -6,6 +6,7 @@ const Tok_enum = lex.Tok_enum;
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 
+// TODO create test for parseFile and test on real file, maybe its causing leak/segfault
 
 pub const NodeType = enum {
     PROGRAM, 
@@ -15,7 +16,7 @@ pub const NodeType = enum {
     ADD,SUB,MUL,MOD,DIV,AND,OR,NOT,NEG,
     EQUAL,N_EQUAL,MORE,LESS,MORE_E,LESS_E,
 
-    ID,
+    ID,FUNC_CALL,PARAMETERS,
 
     IF,WHILE,PRINT,INPUT,FOREACH,
     VAR_DECL,CONST_DECL,ARR_DECL,ASSIGN,
@@ -35,18 +36,51 @@ pub const ParserError = error {
     DivideByZero,
     IncorrectEqualOp,
     UnclosedParenExpr,
+    UnclosedParenFunc,
 };
 
 pub fn parseFile(name: []const u8, alloc: Allocator) !*Node {
-    @setCold(true);
     const buffer = try readFileToString(name, alloc);
-    defer alloc.free(buffer);
-    const tokens = try lex.tokenize(buffer,alloc);
+    defer    alloc.free(buffer);
+    errdefer alloc.free(buffer);
 
-    defer alloc.free(tokens);
+    var tokens = try lex.tokenize(buffer,alloc);
+
+    defer    alloc.free(tokens);
     errdefer alloc.free(tokens);
     
     return parse(tokens,alloc);
+}
+
+fn field_arr(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, lh : ?Node) !Node {
+    _ = alloc;
+    _ = idx;
+    _ = tok_list;
+    _ = lh;    
+}
+
+fn func_params(alloc: Allocator, idx: *usize,tok_list: []const lex.Token) !Node {
+    var func = Node{.typ = .PARAMETERS ,.children = ArrayList(Node).init(alloc)};
+    errdefer freeNodesValues(func,alloc);
+    var first : bool = true;
+    
+    // did it so its not considered error when you by mistake do foo(,5) or foo(2,3,)
+    while(true){
+        if(tok_list[idx.*].tok == Tok_enum.COMMA or first){
+            if(tok_list[idx.*].tok == Tok_enum.COMMA) idx.* += 1;
+            
+            if(and_or(alloc,idx,tok_list,null)) |exp| {
+                try func.children.append(exp);
+            }
+            else |err| {
+                if(err != ParserError.NotMatch) return err;
+                break;
+            }
+            first = false;
+        }
+        else { break; }
+    } 
+    return func;
 }
 
 // okay so this parsing doesn't really work
@@ -60,15 +94,34 @@ fn atom(alloc: Allocator, idx: *usize,tok_list: []const lex.Token) !Node {
             return lit;
         },
         .IDENTIFIER => {
-            var id = Node{.typ = .ID ,.children = ArrayList(Node).init(alloc)};
-            id.value = tok_list[idx.*].value.?;
-            idx.* += 1;
-            return id;
-            // TODO Do this finally
-            // check for method_call
-            // check for func_call
-            // check for arr_access
-            // otherwise its just id
+             var id = Node{.typ = .ID ,.children = ArrayList(Node).init(alloc), .value = tok_list[idx.*].value.? };
+             idx.* += 1;
+             const tok = tok_list[idx.*].tok;
+             errdefer freeNodesValues(id,alloc);
+             
+             switch(tok){
+                Tok_enum.L_PAREN => { // func call
+                    idx.* += 1;
+                    // TODO think about design of function call without any parameters
+                    var func = Node{.typ = .FUNC_CALL ,.children = ArrayList(Node).init(alloc)};
+                    errdefer freeNodesValues(func,alloc);
+                    
+                    var params = try func_params(alloc,idx,tok_list);
+                    if(tok_list[idx.*].tok == Tok_enum.R_PAREN){
+                        idx.* += 1;
+                        try func.children.append(id);
+                        try func.children.append(params);
+                        return func;
+                    }
+                    
+                    freeNodesValues(params,alloc);
+                    return ParserError.UnclosedParenFunc;
+                },
+                else => {
+                    // field or arr check
+                }
+             }
+                return id;
         },
         else => {
             // if its nothing other, check for expression in parenthesis   
@@ -251,12 +304,13 @@ fn expression(alloc: Allocator, idx: *usize,tok_list: []const lex.Token) !Node {
 
 fn parse(tok_list: []const lex.Token, alloc: Allocator) !*Node {
     var Ast :*Node = try alloc.create(Node);
+    Ast.* = Node{.typ = .PROGRAM, .children = ArrayList(Node).init(alloc)};
+    var idx : usize = 0;
     errdefer {
         freeNodesValues(Ast.*,alloc);
         alloc.destroy(Ast);
+        if(idx < tok_list.len) lex.freeTokenValues(tok_list,alloc,idx); // for safety, if we still have remaining values in token list and we error out, they gonna be freed, since we have the offset (idx)
     }
-    Ast.* = Node{.typ = .PROGRAM, .children = ArrayList(Node).init(alloc)};
-    var idx : usize = 0;
     try Ast.children.append(try expression(alloc,&idx,tok_list));
     return Ast;
 }
@@ -268,7 +322,6 @@ pub fn freeAST(tokens: []const lex.Token,res: *Node,alloc: Allocator) void {
     alloc.destroy(res);
 }
 
-// My Dirty way of having it easier on me in main.zig
 pub fn freeNode(res: *Node,alloc: Allocator) void {
     freeNodesValues(res.*,alloc);
     alloc.destroy(res);
@@ -301,18 +354,30 @@ const expect = std.testing.expect;
 const test_alloc = std.testing.allocator;
 
 test "par expression" {
-    var tokens = try lex.tokenize("!(5 + 1)", test_alloc);
+    var tokens = try lex.tokenize("69 + 1", test_alloc);
     var res    = try parse(tokens, test_alloc);
     defer    freeAST(tokens,res,test_alloc);
-    try printNodes(res.*,0);
+    // try printNodes(res.*,0);
 }
 
 test "par unclosed parenthesis for expression" {
     var tokens = try lex.tokenize("(2 + 5 - 1", test_alloc);
     if(parse(tokens, test_alloc)) |res|{
         freeAST(tokens,res,test_alloc);
+        unreachable;
     }else |err| {
         test_alloc.free(tokens);
         try expect(err == ParserError.UnclosedParenExpr);
+    }
+}
+
+test "par unclosed parenthesis for function" {
+    var tokens = try lex.tokenize("foo(69", test_alloc);
+    if(parse(tokens, test_alloc)) |res|{
+        freeAST(tokens,res,test_alloc);
+        unreachable;
+    }else |err| {
+        test_alloc.free(tokens);
+        try expect(err == ParserError.UnclosedParenFunc);
     }
 }
