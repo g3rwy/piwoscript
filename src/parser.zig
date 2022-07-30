@@ -16,7 +16,7 @@ pub const NodeType = enum {
     ADD,SUB,MUL,MOD,DIV,AND,OR,NOT,NEG,
     EQUAL,N_EQUAL,MORE,LESS,MORE_E,LESS_E,
 
-    ID,FUNC_CALL,PARAMETERS,
+    ID,FUNC_CALL,PARAMETERS,FIELD_ACCESS,ARR_ACCESS,
 
     IF,WHILE,PRINT,INPUT,FOREACH,
     VAR_DECL,CONST_DECL,ARR_DECL,ASSIGN,
@@ -30,13 +30,12 @@ pub const Node  = struct {
 };
 
 pub const ParserError = error {
-    NotMatch, // used to determine if function should go further and if the statment or expression is correct
-    StringIntOperation,
-    UndeclaredIdentifier,
-    DivideByZero,
+    NotMatch, // used to determine if function should go further 
     IncorrectEqualOp,
     UnclosedParenExpr,
     UnclosedParenFunc,
+    UnclosedBrackArr,
+    NoIDFieldAccess,
 };
 
 pub fn parseFile(name: []const u8, alloc: Allocator) !*Node {
@@ -48,16 +47,10 @@ pub fn parseFile(name: []const u8, alloc: Allocator) !*Node {
 
     defer    alloc.free(tokens);
     errdefer alloc.free(tokens);
-    
+    // FIXME something about free'ing tokens after returnin Ast
     return parse(tokens,alloc);
 }
 
-fn field_arr(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, lh : ?Node) !Node {
-    _ = alloc;
-    _ = idx;
-    _ = tok_list;
-    _ = lh;    
-}
 
 fn func_params(alloc: Allocator, idx: *usize,tok_list: []const lex.Token) !Node {
     var func = Node{.typ = .PARAMETERS ,.children = ArrayList(Node).init(alloc)};
@@ -83,7 +76,52 @@ fn func_params(alloc: Allocator, idx: *usize,tok_list: []const lex.Token) !Node 
     return func;
 }
 
-// okay so this parsing doesn't really work
+fn field_arr(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, lh : Node) !Node {
+    var res : Node = Node{.typ = .PROGRAM ,.children = ArrayList(Node).init(alloc)};
+    try res.children.append(lh);
+    errdefer freeNodesValues(res,alloc);
+
+    if(tok_list[idx.*].tok == Tok_enum.PERIOD) {
+        res.typ = .FIELD_ACCESS;
+        idx.* += 1;
+        if(tok_list[idx.*].tok == Tok_enum.IDENTIFIER){
+            var id = Node{.typ = .ID ,.children = ArrayList(Node).init(alloc), .value = tok_list[idx.*].value.? };
+            errdefer freeNodesValues(id,alloc);
+            idx.* += 1;
+
+            try res.children.append(id);
+            if(tok_list[idx.*].tok == Tok_enum.L_BRACK or tok_list[idx.*].tok == Tok_enum.PERIOD){
+               return field_arr(alloc,idx,tok_list,res);
+            }
+            else{ return res; }
+        }
+        
+        else{ return ParserError.NoIDFieldAccess; }
+    }
+    else if(tok_list[idx.*].tok == Tok_enum.L_BRACK) {
+        res.typ = .ARR_ACCESS;        
+        idx.* += 1;
+        if(and_or(alloc,idx,tok_list,null)) |exp| {
+            try res.children.append(exp);
+        }
+        else |err| {
+            if(err != ParserError.NotMatch) return err;
+        }
+        if(tok_list[idx.*].tok == Tok_enum.R_BRACK){
+            idx.* += 1;
+            if(tok_list[idx.*].tok == Tok_enum.L_BRACK or tok_list[idx.*].tok == Tok_enum.PERIOD){
+                return field_arr(alloc,idx,tok_list,res);
+            }
+            else{ return res; }
+        }
+        // if there is no ] at the end of expression
+        else{ return ParserError.UnclosedBrackArr; }
+    }
+    
+    return ParserError.NotMatch;
+}
+
+
 fn atom(alloc: Allocator, idx: *usize,tok_list: []const lex.Token) !Node {
     switch(tok_list[idx.*].tok){
         .BOOL_LIT,.STRING_LIT,.CHAR_LIT,.INT_LIT,.FLOAT_LIT => {
@@ -97,15 +135,13 @@ fn atom(alloc: Allocator, idx: *usize,tok_list: []const lex.Token) !Node {
              var id = Node{.typ = .ID ,.children = ArrayList(Node).init(alloc), .value = tok_list[idx.*].value.? };
              idx.* += 1;
              const tok = tok_list[idx.*].tok;
-             errdefer freeNodesValues(id,alloc);
              
              switch(tok){
                 Tok_enum.L_PAREN => { // func call
+                    errdefer freeNodesValues(id,alloc);
                     idx.* += 1;
-                    // TODO think about design of function call without any parameters
                     var func = Node{.typ = .FUNC_CALL ,.children = ArrayList(Node).init(alloc)};
                     errdefer freeNodesValues(func,alloc);
-                    
                     var params = try func_params(alloc,idx,tok_list);
                     if(tok_list[idx.*].tok == Tok_enum.R_PAREN){
                         idx.* += 1;
@@ -117,9 +153,10 @@ fn atom(alloc: Allocator, idx: *usize,tok_list: []const lex.Token) !Node {
                     freeNodesValues(params,alloc);
                     return ParserError.UnclosedParenFunc;
                 },
-                else => {
-                    // field or arr check
-                }
+                Tok_enum.PERIOD,Tok_enum.L_BRACK => {    
+                    return field_arr(alloc, idx, tok_list, id);
+                },
+                else => {}
              }
                 return id;
         },
@@ -354,7 +391,7 @@ const expect = std.testing.expect;
 const test_alloc = std.testing.allocator;
 
 test "par expression" {
-    var tokens = try lex.tokenize("69 + 1", test_alloc);
+    var tokens = try lex.tokenize("population.city[5]", test_alloc);
     var res    = try parse(tokens, test_alloc);
     defer    freeAST(tokens,res,test_alloc);
     // try printNodes(res.*,0);
@@ -380,4 +417,10 @@ test "par unclosed parenthesis for function" {
         test_alloc.free(tokens);
         try expect(err == ParserError.UnclosedParenFunc);
     }
+}
+
+test "par parsing a file instead of const string" { 
+    var res = try parseFile("exp.piwo",test_alloc);
+    try printNodes(res.*,0);
+    freeNodesValues(res.*,test_alloc);
 }
