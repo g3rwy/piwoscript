@@ -11,7 +11,7 @@ pub fn main() anyerror!void {
     const argv = try std.process.argsAlloc(alloc);
     _ = argv;
     defer std.process.argsFree(alloc, argv);
-    var AST : *parser.Node = undefined;
+    var AST : parser.FilePre = undefined;
 
     
     if (argv.len > 1) {
@@ -19,8 +19,8 @@ pub fn main() anyerror!void {
             if (i == 1) AST = try parser.parseFile(arg, alloc);
         }
     // XXX for now i leave it like this so it doesn't cause a leak :P
-    try parser.printNodes(AST.*,0);
-    parser.freeNode(AST,alloc);
+    try parser.printNodes(AST.ast.*,0);
+    parser.freeAST(AST.tokens,AST.ast,alloc);
     
     } else {
         const stdout = std.io.getStdOut().writer();

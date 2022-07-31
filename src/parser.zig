@@ -6,8 +6,6 @@ const Tok_enum = lex.Tok_enum;
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 
-// TODO create test for parseFile and test on real file, maybe its causing leak/segfault
-
 pub const NodeType = enum {
     PROGRAM, 
     STATEMENT,
@@ -38,17 +36,26 @@ pub const ParserError = error {
     NoIDFieldAccess,
 };
 
-pub fn parseFile(name: []const u8, alloc: Allocator) !*Node {
-    const buffer = try readFileToString(name, alloc);
-    defer    alloc.free(buffer);
-    errdefer alloc.free(buffer);
+pub const FilePre = struct {
+    tokens : [] const lex.Token,
+    ast : *Node    
+};
 
+pub fn parseFile(name: []const u8, alloc: Allocator) !FilePre {
+    var buffer = try readFileToString(name, alloc);
+    
     var tokens = try lex.tokenize(buffer,alloc);
+    alloc.free(buffer);
 
-    defer    alloc.free(tokens);
-    errdefer alloc.free(tokens);
-    // FIXME something about free'ing tokens after returnin Ast
-    return parse(tokens,alloc);
+    
+    
+    if(parse(tokens,alloc)) |res|{
+        return FilePre{ .tokens = tokens, .ast =  res};
+    }else |err| {
+        // XXX free all the tokens if they are not freed in parse()
+        alloc.free(tokens);
+        return err;
+    }
 }
 
 
@@ -79,14 +86,15 @@ fn func_params(alloc: Allocator, idx: *usize,tok_list: []const lex.Token) !Node 
 fn field_arr(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, lh : Node) !Node {
     var res : Node = Node{.typ = .PROGRAM ,.children = ArrayList(Node).init(alloc)};
     try res.children.append(lh);
-    errdefer freeNodesValues(res,alloc);
+    
+    errdefer res.children.deinit();
 
     if(tok_list[idx.*].tok == Tok_enum.PERIOD) {
         res.typ = .FIELD_ACCESS;
         idx.* += 1;
         if(tok_list[idx.*].tok == Tok_enum.IDENTIFIER){
             var id = Node{.typ = .ID ,.children = ArrayList(Node).init(alloc), .value = tok_list[idx.*].value.? };
-            errdefer freeNodesValues(id,alloc);
+            errdefer id.children.deinit();
             idx.* += 1;
 
             try res.children.append(id);
@@ -135,15 +143,16 @@ fn atom(alloc: Allocator, idx: *usize,tok_list: []const lex.Token) !Node {
              var id = Node{.typ = .ID ,.children = ArrayList(Node).init(alloc), .value = tok_list[idx.*].value.? };
              idx.* += 1;
              const tok = tok_list[idx.*].tok;
-             
+             errdefer id.children.deinit();
              switch(tok){
                 Tok_enum.L_PAREN => { // func call
-                    errdefer freeNodesValues(id,alloc);
+                    // errdefer freeNodesValues(id,alloc);
                     idx.* += 1;
                     var func = Node{.typ = .FUNC_CALL ,.children = ArrayList(Node).init(alloc)};
-                    errdefer freeNodesValues(func,alloc);
+                    errdefer func.children.deinit();
                     var params = try func_params(alloc,idx,tok_list);
                     if(tok_list[idx.*].tok == Tok_enum.R_PAREN){
+                        // --MAYBE FIXED-- FIXME, might cause a double free, if id is appended to func and cause an error
                         idx.* += 1;
                         try func.children.append(id);
                         try func.children.append(params);
@@ -185,8 +194,8 @@ fn unary(alloc: Allocator, idx: *usize,tok_list: []const lex.Token) anyerror!Nod
     else{
         var un = Node{.typ = if(symbol == Tok_enum.NOT) .NOT else .NEG,.children = ArrayList(Node).init(alloc)};
         idx.* += 1;
+        errdefer un.children.deinit();
         try un.children.append(try unary(alloc,idx,tok_list));
-        errdefer freeNode(&un,alloc);
         return un;
     }
     return ParserError.NotMatch;
@@ -213,13 +222,14 @@ fn factor(alloc: Allocator, idx: *usize,tok_list: []const lex.Token,lh : ?Node) 
         } ,.children = ArrayList(Node).init(alloc)};
 
         idx.* += 1;
+        errdefer tree.children.deinit();
+
         const rhs = try unary(alloc,idx,tok_list);
         try tree.children.append(lhs);
         try tree.children.append(rhs);
         if(tok_list[idx.*].tok == Tok_enum.MUL or tok_list[idx.*].tok == Tok_enum.DIV or tok_list[idx.*].tok == Tok_enum.MOD) 
         { return factor(alloc,idx,tok_list,tree); }
 
-        errdefer freeNode(&tree,alloc);
         return tree;
     }
 
@@ -237,16 +247,35 @@ fn term(alloc: Allocator, idx: *usize,tok_list: []const lex.Token,lh : ?Node) !N
     else{
         var tree = Node{.typ = if(next_tok.? == Tok_enum.ADD) .ADD else .SUB ,.children = ArrayList(Node).init(alloc)};
         idx.* += 1;
-        const rhs = try factor(alloc,idx,tok_list,null);
+        errdefer {
+            // FIXME Current problem is that rhs returns error and some node in lhs doesn't get deinit()
+            freeNodesValues(lhs,alloc);
+            tree.children.deinit();
+        }
         try tree.children.append(lhs);
+        const rhs = try factor(alloc,idx,tok_list,null);
         try tree.children.append(rhs);
         if(tok_list[idx.*].tok == Tok_enum.ADD or tok_list[idx.*].tok == Tok_enum.SUB) { return term(alloc,idx,tok_list,tree); }
-        errdefer freeNode(&tree,alloc);
 
         return tree;
     }
     return ParserError.NotMatch;
 }
+
+// Tree when everything is alrighty, the last ADD with 2 and 2 is one that errors out
+// - PROGRAM
+    // - EXPR
+        // - ADD
+            // - SUB
+                // - ADD
+                    // - ID a
+                    // - INT_LIT 5
+                // - ARR_ACCESS
+                    // - ID foo
+                    // - INT_LIT 1
+            // - ADD
+                // - INT_LIT 2
+                // - INT_LIT 2
 
 fn comparison(alloc: Allocator, idx: *usize,tok_list: []const lex.Token,lh: ?Node) !Node {
     var lhs : Node = undefined;
@@ -267,11 +296,14 @@ fn comparison(alloc: Allocator, idx: *usize,tok_list: []const lex.Token,lh: ?Nod
             idx.* += 1;
         }
 
+        errdefer {
+            std.debug.print("FUCKING",.{});
+            tree.children.deinit();
+        }
         const rhs = try term(alloc,idx,tok_list,null);
         try tree.children.append(lhs);
         try tree.children.append(rhs);
         if(tok_list[idx.*].tok == .BIGGER or tok_list[idx.*].tok == .SMALLER) { return comparison(alloc,idx,tok_list,tree); }
-        errdefer freeNode(&tree,alloc);
         
         return tree;
     }
@@ -292,11 +324,12 @@ fn equality(alloc: Allocator, idx: *usize,tok_list: []const lex.Token,lh: ?Node)
             var tree = Node{.typ = if(next_tok.? == .EQU) .EQUAL else .N_EQUAL ,.children = ArrayList(Node).init(alloc)};
             idx.* += 2;
             
+            errdefer tree.children.deinit();
             const rhs = try comparison(alloc,idx,tok_list,null);
             try tree.children.append(lhs);
             try tree.children.append(rhs);
             if(tok_list[idx.*].tok == .EQU or tok_list[idx.*].tok == Tok_enum.NOT) { return equality(alloc,idx,tok_list,tree); }
-            errdefer freeNode(&tree,alloc);
+
 
             return tree;
         }
@@ -319,10 +352,11 @@ fn and_or(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, lh: ?Node) 
         var tree = Node{.typ = if(next_tok.? == Tok_enum.AND) .AND else .OR ,.children = ArrayList(Node).init(alloc)};
         idx.* += 1;
         
+        errdefer tree.children.deinit();
         const rhs = try equality(alloc,idx,tok_list,null);
         try tree.children.append(lhs);
         try tree.children.append(rhs);
-        errdefer freeNode(&tree,alloc);
+
         // we check for operators after expression ( AND and OR keywords)
         // if operator is found, we know we gotta go further so we pass the expression as our left side and do everything again
         if(tok_list[idx.*].tok == Tok_enum.AND or tok_list[idx.*].tok == Tok_enum.OR) { return and_or(alloc,idx,tok_list,tree); }
@@ -333,8 +367,8 @@ fn and_or(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, lh: ?Node) 
 
 fn expression(alloc: Allocator, idx: *usize,tok_list: []const lex.Token) !Node {
     var exp = Node{.typ = .EXPR, .children = ArrayList(Node).init(alloc)};
-    
-    _ = try exp.children.append(try and_or(alloc,idx,tok_list,null));
+    errdefer freeNodesValues(exp,alloc); // should have free all the nodes that have been added
+    try exp.children.append(try and_or(alloc,idx,tok_list,null));
     return exp;
 }
 
@@ -346,7 +380,7 @@ fn parse(tok_list: []const lex.Token, alloc: Allocator) !*Node {
     errdefer {
         freeNodesValues(Ast.*,alloc);
         alloc.destroy(Ast);
-        if(idx < tok_list.len) lex.freeTokenValues(tok_list,alloc,idx); // for safety, if we still have remaining values in token list and we error out, they gonna be freed, since we have the offset (idx)
+        lex.freeTokenValues(tok_list,alloc,0); // TODO in future use token to print out where the error is and only then free it
     }
     try Ast.children.append(try expression(alloc,&idx,tok_list));
     return Ast;
@@ -354,6 +388,7 @@ fn parse(tok_list: []const lex.Token, alloc: Allocator) !*Node {
 
 
 pub fn freeAST(tokens: []const lex.Token,res: *Node,alloc: Allocator) void {
+    lex.freeTokenValues(tokens,alloc,0);
     alloc.free(tokens);
     freeNodesValues(res.*,alloc);     // free node (the AST) all its children and their values
     alloc.destroy(res);
@@ -364,8 +399,9 @@ pub fn freeNode(res: *Node,alloc: Allocator) void {
     alloc.destroy(res);
 }
 
+// TODO remove all the alloc param from freeNodesValues
 fn freeNodesValues(node: Node, alloc: Allocator) void {
-    if(node.value != null)    alloc.free(node.value.?);
+    //if(node.value != null)    alloc.free(node.value.?);
     for(node.children.items) |c| 
            freeNodesValues(c,alloc);
     node.children.deinit();
@@ -391,6 +427,7 @@ const expect = std.testing.expect;
 const test_alloc = std.testing.allocator;
 
 test "par expression" {
+    if(true) return error.SkipZigTest;
     var tokens = try lex.tokenize("population.city[5]", test_alloc);
     var res    = try parse(tokens, test_alloc);
     defer    freeAST(tokens,res,test_alloc);
@@ -398,7 +435,8 @@ test "par expression" {
 }
 
 test "par unclosed parenthesis for expression" {
-    var tokens = try lex.tokenize("(2 + 5 - 1", test_alloc);
+    // if(true) return error.SkipZigTest;
+    var tokens = try lex.tokenize("a[69] + (2 + 2", test_alloc);
     if(parse(tokens, test_alloc)) |res|{
         freeAST(tokens,res,test_alloc);
         unreachable;
@@ -409,6 +447,7 @@ test "par unclosed parenthesis for expression" {
 }
 
 test "par unclosed parenthesis for function" {
+    if(true) return error.SkipZigTest;
     var tokens = try lex.tokenize("foo(69", test_alloc);
     if(parse(tokens, test_alloc)) |res|{
         freeAST(tokens,res,test_alloc);
@@ -419,8 +458,9 @@ test "par unclosed parenthesis for function" {
     }
 }
 
-test "par parsing a file instead of const string" { 
+test "par parsing a file instead of const string" {
+    if(true) return error.SkipZigTest;
     var res = try parseFile("exp.piwo",test_alloc);
-    try printNodes(res.*,0);
-    freeNodesValues(res.*,test_alloc);
+    try printNodes(res.ast.*,0);
+    freeAST(res.tokens,res.ast,test_alloc);
 }
