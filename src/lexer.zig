@@ -2,6 +2,8 @@ const std = @import("std");
 const ArrayList = std.ArrayList;
 const readFileToString = @import("utils.zig").readFileToString;
 
+// TODO add NULL type and maybe wypiszl
+
 pub const Tok_enum = enum(u8) {
     NEWLINE,
     // Literals
@@ -391,7 +393,21 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
             },
             '-' => {
                 if(word.len == 2){ // stupid, since no one will leave arrow as last token, but well, i will leave it here
-                    if(word[idx] == '>') try token_list.append(Token{.tok = .ARROW}); break;
+                    if(word[idx] == '>'){ try token_list.append(Token{.tok = .ARROW}); break; }
+                    else{
+                        switch(word[idx]){
+                            '0' ... '9' => {
+                                try token_list.append(Token{.tok = .INT_LIT , .value = try alloc.dupe(u8,word[0..idx+1])} ); 
+                                break; 
+                            },
+                            else => {
+                                try token_list.append(Token{.tok = .SUB}); 
+                                word.ptr += 1;
+                                word.len -= 1;
+                                continue;   
+                            }
+                        }
+                    }
                 }
                 switch(word[idx]){
                     '0'...'9' => {
