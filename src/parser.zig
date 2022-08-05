@@ -63,18 +63,20 @@ pub fn parseFile(name: []const u8, alloc: Allocator) !FilePre {
 }
 
 
-fn func_params(alloc: Allocator, idx: *usize,tok_list: []const lex.Token) !Node {
-    var func = Node{.typ = .PARAMETERS ,.children = ArrayList(Node).init(alloc)};
-    errdefer freeNodesValues(func,alloc);
+fn func_params(alloc: Allocator, idx: *usize,tok_list: []const lex.Token,ast : *ArrayList(Node)) !u32 {
+    var par = Node{.typ = .PARAMETERS ,.children = ArrayList(u32).init(alloc)};
+    errdefer par.children.deinit();
     var first : bool = true;
+    try ast.append(par);
+    const par_idx = @truncate(u32, ast.items.len - 1);
     
     // did it so its not considered error when you by mistake do foo(,5) or foo(2,3,)
     while(true){
         if(tok_list[idx.*].tok == Tok_enum.COMMA or first){
             if(tok_list[idx.*].tok == Tok_enum.COMMA) idx.* += 1;
             
-            if(and_or(alloc,idx,tok_list,null)) |exp| {
-                try func.children.append(exp);
+            if(and_or(alloc,idx,tok_list,ast,null)) |exp| {
+                try ast.items[par_idx].children.append(exp);
             }
             else |err| {
                 if(err != ParserError.NotMatch) return err;
@@ -84,28 +86,35 @@ fn func_params(alloc: Allocator, idx: *usize,tok_list: []const lex.Token) !Node 
         }
         else { break; }
     } 
-    return func;
+    return par_idx;
 }
 
-fn field_arr(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, lh : Node) !Node {
-    var res : Node = Node{.typ = .PROGRAM ,.children = ArrayList(Node).init(alloc)};
-    try res.children.append(lh);
-    
+fn field_arr(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, lh : u32,ast : *ArrayList(Node)) !u32 {
+    var res : Node = Node{.typ = .PROGRAM ,.children = ArrayList(u32).init(alloc)};
     errdefer res.children.deinit();
+    
+
+    
 
     if(tok_list[idx.*].tok == Tok_enum.PERIOD) {
         res.typ = .FIELD_ACCESS;
         idx.* += 1;
+        try ast.append(res);
+        const res_idx = @truncate(u32, ast.items.len - 1);
+        try ast.items[res_idx].children.append(lh);
+
         if(tok_list[idx.*].tok == Tok_enum.IDENTIFIER){
-            var id = Node{.typ = .ID ,.children = ArrayList(Node).init(alloc), .value = tok_list[idx.*].value.? };
+            var id = Node{.typ = .ID ,.children = ArrayList(u32).init(alloc), .value = tok_list[idx.*].value.? };
             errdefer id.children.deinit();
             idx.* += 1;
+            try ast.append(id);
+            const id_idx = @truncate(u32, ast.items.len - 1);
 
-            try res.children.append(id);
+            try ast.items[res_idx].children.append(id_idx);
             if(tok_list[idx.*].tok == Tok_enum.L_BRACK or tok_list[idx.*].tok == Tok_enum.PERIOD){
-               return field_arr(alloc,idx,tok_list,res);
+               return field_arr(alloc,idx,tok_list,res_idx,ast);
             }
-            else{ return res; }
+            else{ return res_idx; }
         }
         
         else{ return ParserError.NoIDFieldAccess; }
@@ -113,8 +122,12 @@ fn field_arr(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, lh : Nod
     else if(tok_list[idx.*].tok == Tok_enum.L_BRACK) {
         res.typ = .ARR_ACCESS;        
         idx.* += 1;
-        if(and_or(alloc,idx,tok_list,null)) |exp| {
-            try res.children.append(exp);
+        try ast.append(res);
+        const res_idx = @truncate(u32, ast.items.len - 1);
+        try ast.items[res_idx].children.append(lh);
+
+        if(and_or(alloc,idx,tok_list,ast,null)) |exp| {
+            try  ast.items[res_idx].children.append(exp);
         }
         else |err| {
             if(err != ParserError.NotMatch) return err;
@@ -122,9 +135,9 @@ fn field_arr(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, lh : Nod
         if(tok_list[idx.*].tok == Tok_enum.R_BRACK){
             idx.* += 1;
             if(tok_list[idx.*].tok == Tok_enum.L_BRACK or tok_list[idx.*].tok == Tok_enum.PERIOD){
-                return field_arr(alloc,idx,tok_list,res);
+                return field_arr(alloc,idx,tok_list,res_idx,ast);
             }
-            else{ return res; }
+            else{ return res_idx; }
         }
         // if there is no ] at the end of expression
         else{ return ParserError.UnclosedBrackArr; }
@@ -145,39 +158,45 @@ fn atom(alloc: Allocator, idx: *usize, tok_list: []const lex.Token,ast : *ArrayL
             return @truncate(u32, ast.items.len - 1);
         },
         .IDENTIFIER => {
-             // XXX TODO IDENTIFIERS 
-             if (true)  return 0;
-             var id = Node{.typ = .ID ,.children = ArrayList(u32).init(alloc), .value = tok_list[idx.*].value.? };
+             var id = Node{.typ = .ID ,.children =  ArrayList(u32).init(alloc), .value = tok_list[idx.*].value.? };
              errdefer id.children.deinit();
+
+             try ast.append(id);
+             const id_idx = @truncate(u32, ast.items.len - 1);
+             
              idx.* += 1;
              const tok = tok_list[idx.*].tok;
              
              switch(tok){
                 Tok_enum.L_PAREN => { // func call
                     idx.* += 1;
-                    var func = Node{.typ = .FUNC_CALL ,.children = ArrayList(Node).init(alloc)};
+                    var func = Node{.typ = .FUNC_CALL ,.children = ArrayList(u32).init(alloc)};
                     errdefer func.children.deinit();
+
+                    try ast.append(func);
+                    const func_idx = @truncate(u32, ast.items.len - 1);
                     
-                    var params = try func_params(alloc,idx,tok_list);
+                    const params = try func_params(alloc,idx,tok_list,ast);
+
                     if(tok_list[idx.*].tok == Tok_enum.R_PAREN){
                         idx.* += 1;
-                        try func.children.append(id);
-                        try func.children.append(params);
                         //return func;
+                        try ast.items[func_idx].children.append(id_idx); // add id to ast and add it as function children
+                        try ast.items[func_idx].children.append(params);
+                        return func_idx;
                     }
                     
-                    freeNodesValues(params,alloc);
                     return ParserError.UnclosedParenFunc;
                 },
                 Tok_enum.PERIOD,Tok_enum.L_BRACK => {    
-                    //return field_arr(alloc, idx, tok_list, id);
+                    return field_arr(alloc, idx, tok_list, id_idx, ast);
                 },
                 else => {}
              }
-                //return id;
+            //return id;
+            return id_idx;
         },
         else => {
-
             // if its nothing other, check for expression in parenthesis   
             if(tok_list[idx.*].tok == Tok_enum.L_PAREN){
                 idx.* += 1;
@@ -461,9 +480,10 @@ const eql = std.mem.eql;
 const expect = std.testing.expect;
 const test_alloc = std.testing.allocator;
 
+
 test "par expression" {
     // if(true) return error.SkipZigTest;
-    var tokens = try lex.tokenize("6 * -(7) + 2", test_alloc);
+    var tokens = try lex.tokenize("foo.abc + bar[-1] * (7 % 2)", test_alloc);
     var res    = try parse(tokens, test_alloc);
     defer    freeAST(tokens,res,test_alloc);
     try printNodes(res,0,0);

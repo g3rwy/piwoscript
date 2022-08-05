@@ -3,6 +3,7 @@ const ArrayList = std.ArrayList;
 const readFileToString = @import("utils.zig").readFileToString;
 
 // TODO add NULL type and maybe wypiszl
+// TODO return error when input is empty
 
 pub const Tok_enum = enum(u8) {
     NEWLINE,
