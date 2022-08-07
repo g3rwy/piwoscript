@@ -7,23 +7,38 @@ pub fn main() anyerror!void {
     const alloc = gpa.allocator();
 
     defer _ = gpa.deinit();
+    errdefer _ = gpa.deinit();
 
     const argv = try std.process.argsAlloc(alloc);
     _ = argv;
     defer std.process.argsFree(alloc, argv);
-    var AST : parser.FilePre = undefined;
+    errdefer std.process.argsFree(alloc, argv);
+    
+    var Ast : parser.FilePre = undefined;
 
+    const stdout = std.io.getStdOut().writer();
     
     if (argv.len > 1) {
-        for (argv) |arg, i| { // No idea why, but this way its the safest so fuck it
-            if (i == 1) AST = try parser.parseFile(arg, alloc);
+        for (argv) |arg, i| {
+            if (i == 1) {
+            if(parser.parseFile(arg, alloc)) |result| { Ast = result; }
+            else |err|{
+                // TODO use switch and maybe like some kind of array of prompts that show off when error is there
+                // Input is empty
+                if(err == lex.LexerError.EmptyInput){
+                    try stdout.print("The input is empty tho :/\n", .{});
+                }
+                return;
+            
+            }
+            }
         }
+    
     // XXX for now i leave it like this so it doesn't cause a leak :P
-    try parser.printNodes(AST.ast.*,0);
-    parser.freeAST(AST.tokens,AST.ast,alloc);
+    try parser.printNodes(Ast.ast,0,0);
+    parser.freeAST(Ast.tokens,Ast.ast,alloc);
     
     } else {
-        const stdout = std.io.getStdOut().writer();
-        try stdout.print("No file provided :/\n", .{});
+        try stdout.print("No input provided :/\n", .{});
     }
 }

@@ -2,10 +2,8 @@ const std = @import("std");
 const ArrayList = std.ArrayList;
 const readFileToString = @import("utils.zig").readFileToString;
 
-// TODO add NULL type and maybe wypiszl
-// TODO return error when input is empty
-
 pub const Tok_enum = enum(u8) {
+    EOF,
     NEWLINE,
     // Literals
     STRING_LIT,
@@ -20,6 +18,7 @@ pub const Tok_enum = enum(u8) {
     FLOAT_TYPE,
     BOOL_TYPE,
     KURWA_TYPE,
+    NULL,
     // Keywords
     PIWO,
     KUFEL,
@@ -80,6 +79,7 @@ const cmp_words = [_][]const u8{
 "float",
 "bool",
 "kurwa",
+"null",
 "piwo",
 "kufel",
 "wino",
@@ -109,11 +109,12 @@ const one_char_ops = [_]u8{
 pub const Token = struct{tok : Tok_enum, value : ?[]const u8 = null};
 const SPACE_INDENT = 4;
 
-const LexerError = error {
+pub const LexerError = error {
     InvalidIndentation,
     UnclosedComment,
     UnclosedString,
-    IncorrectSlashChar
+    IncorrectSlashChar,
+    EmptyInput
 };
 
 const TokenizingState = enum{
@@ -125,6 +126,7 @@ const TokenizingState = enum{
 pub fn tokenizeFile(name: []const u8,alloc: std.mem.Allocator) ![]Token {
     const buffer = try readFileToString(name, alloc);
     defer alloc.free(buffer);
+    
     return tokenize(buffer,alloc);
 }
 
@@ -169,6 +171,14 @@ pub fn printTokens(tokens: []Token) !void {
 }
 
 pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
+
+    var empty_check : bool = true;
+    for(buffer) |c| {
+        if(c == ' ' or c == '\t' or c == '\n' or c == '\r'){ continue; }
+        else { empty_check = false ;break;}
+    }
+    if(empty_check) return LexerError.EmptyInput;
+    
     var token_list = ArrayList(Token).init(alloc);
     defer token_list.deinit();
     errdefer for(token_list.items) |*t| { if(t.value != null) alloc.free(t.value.?); };
@@ -486,6 +496,8 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
             try token_list.append(Token{.tok = .DEDENT});
         }
     }
+    
+    try token_list.append(Token{.tok = .EOF});
     return token_list.toOwnedSlice();
 }
 
@@ -526,6 +538,7 @@ test "lex basic variable declaration" {
             .{.tok = .EQU},
             .{.tok = .INT_LIT, .value = "-10"},
             .{.tok = .NEWLINE},
+            .{.tok = .EOF},
     };
     try testTokens(test1[0..],res);
     freeTokenValues(res,test_alloc,0);
@@ -543,6 +556,7 @@ test "lex basic variable assign" {
             .{.tok = .EQU},
             .{.tok = .FLOAT_LIT, .value = "69.420"},
             .{.tok = .NEWLINE},
+            .{.tok = .EOF},
     };
     
     try testTokens(test1[0..],res);
@@ -562,6 +576,8 @@ test "lex basic indentation" {
             .{.tok = .INDENT},
             .{.tok = .PIWO},
             .{.tok = .NEWLINE},
+            .{.tok = .DEDENT},
+            .{.tok = .EOF},
     };
     
     try testTokens(test1[0..],res);
@@ -588,7 +604,7 @@ test "lex recovering from indentation" {
             .{.tok = .INDENT},
             .{.tok = .PIWO},.{.tok = .NEWLINE},
             .{.tok = .DEDENT},.{.tok = .DEDENT},
-            //.{.tok = .PIWO},.{.tok = .NEWLINE},
+            .{.tok = .EOF},
     };
     
     try testTokens(test1[0..],res);
@@ -614,6 +630,7 @@ test "lex ignoring line empty with indentation" {
             .{.tok = .PIWO},.{.tok = .NEWLINE},
             .{.tok = .PIWO},.{.tok = .NEWLINE},
             .{.tok = .DEDENT},
+            .{.tok = .EOF},
     };
     
     try testTokens(test1[0..],res);
@@ -631,6 +648,7 @@ test "lex unicode polish letters working - 1" {
     const test1 = [_]Token{
             .{.tok = .IF},
             .{.tok = .NEWLINE},
+            .{.tok = .EOF},
     };
     
     try testTokens(test1[0..],res);
@@ -648,6 +666,7 @@ test "lex unicode polish letters working - 2" {
     const test1 = [_]Token{
             .{.tok = .RETURN},
             .{.tok = .NEWLINE},
+            .{.tok = .EOF},
     };
     
     try testTokens(test1[0..],res);
@@ -671,6 +690,7 @@ test "lex skipping comments" {
             .{.tok = .PIWO},.{.tok = .NEWLINE},
             .{.tok = .DEDENT},
             .{.tok = .PIWO},.{.tok = .PIWO},.{.tok = .NEWLINE},
+            .{.tok = .EOF},
     };
     
     try testTokens(test1[0..],res);
@@ -692,6 +712,7 @@ test "lex multiline comments" {
 
     const test1 = [_]Token{
             .{.tok = .PIWO},.{.tok = .NEWLINE},
+            .{.tok = .EOF},
     };
     
     try testTokens(test1[0..],res);
@@ -726,6 +747,7 @@ test "lex string literal" {
             .{.tok = .EQU}, 
             .{.tok = .STRING_LIT, .value = " foo abc"},
             .{.tok = .NEWLINE},
+            .{.tok = .EOF},
     };
     try testTokens(test1[0..],res);
     freeTokenValues(res,test_alloc,0);
@@ -754,6 +776,7 @@ test "lex string slashes support" {
             .{.tok = .EQU}, 
             .{.tok = .STRING_LIT, .value = "\n\t\""},
             .{.tok = .NEWLINE},
+            .{.tok = .EOF},
     };
     try testTokens(test1[0..],res);
     freeTokenValues(res,test_alloc,0);
@@ -773,6 +796,7 @@ test "lex char literals" {
             .{.tok = .EQU}, 
             .{.tok = .CHAR_LIT, .value = "\t"},
             .{.tok = .NEWLINE},
+            .{.tok = .EOF},
     };
     try testTokens(test1[0..],res);
     freeTokenValues(res,test_alloc,0);
@@ -813,7 +837,8 @@ test "lex example code" {
             .{.tok = .INDENT},.{.tok = .PRINT},.{.tok = .STRING_LIT, .value = "Equal\n"}, .{.tok = .NEWLINE},
             .{.tok = .DEDENT},
             .{.tok = .ELSE}, .{.tok = .COLON}, .{.tok = .NEWLINE},
-            .{.tok = .INDENT}, .{.tok = .INPUT}, .{.tok = .IDENTIFIER, .value = "foo"}, .{.tok = .NEWLINE}, .{.tok = .DEDENT}
+            .{.tok = .INDENT}, .{.tok = .INPUT}, .{.tok = .IDENTIFIER, .value = "foo"}, .{.tok = .NEWLINE}, .{.tok = .DEDENT},
+            .{.tok = .EOF},
     };
     
     try testTokens(test1[0..],res);

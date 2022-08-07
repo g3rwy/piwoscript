@@ -7,8 +7,7 @@ const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 const Array = std.BoundedArray;
 
-// TODO calculate it based on how many tokens we got
-const AST_CAPACITY = 20;
+const AVG_NODE_PER_LINE = 6;
 
 pub const NodeType = enum {
     PROGRAM, 
@@ -42,22 +41,20 @@ pub const ParserError = error {
 
 pub const FilePre = struct {
     tokens : [] const lex.Token,
-    ast : *Node    
+    ast : ArrayList(Node)    
 };
 
 pub fn parseFile(name: []const u8, alloc: Allocator) !FilePre {
     var buffer = try readFileToString(name, alloc);
-    
+
+    errdefer alloc.free(buffer);
     var tokens = try lex.tokenize(buffer,alloc);
     alloc.free(buffer);
-
     
     
     if(parse(tokens,alloc)) |res|{
         return FilePre{ .tokens = tokens, .ast =  res};
     }else |err| {
-        // XXX free all the tokens if they are not freed in parse()
-        alloc.free(tokens);
         return err;
     }
 }
@@ -193,7 +190,7 @@ fn atom(alloc: Allocator, idx: *usize, tok_list: []const lex.Token,ast : *ArrayL
                 },
                 else => {}
              }
-            //return id;
+            //return id since its nothing else
             return id_idx;
         },
         else => {
@@ -204,7 +201,9 @@ fn atom(alloc: Allocator, idx: *usize, tok_list: []const lex.Token,ast : *ArrayL
                 // if it returns ParserError then its okay, since there should be expression here, if anything else then good too since we don't want errors
                 if(tok_list[idx.*].tok == Tok_enum.R_PAREN){ idx.* += 1; return exp; }
                 else{ return ParserError.UnclosedParenExpr; }
-            }   
+            }
+            // if not, maybe its array literal, so do the same shit as func but for array
+               
         }
     }
     std.debug.print("\n{s}\n",.{tok_list});
@@ -419,22 +418,24 @@ fn expression(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, ast : *
     const exp_idx = @truncate(u32, ast.items.len - 1);
     try ast.items[pan_idx].children.append(exp_idx); // Add exp as children to parent sitting at pan_idx
 
-     try ast.items[exp_idx].children.append(try and_or(alloc,idx,tok_list,ast,null));
+    const result = try and_or(alloc,idx,tok_list,ast,null);
+    try ast.items[exp_idx].children.append(result);
 }
 
 
 fn parse(tok_list: []const lex.Token, alloc: Allocator) !ArrayList(Node) {
+    // Idk i feel like its funny to estimate how many nodes there might be in the Ast 
+    var LINES : usize = 1;
+    for(tok_list) |t| { if(t.tok == Tok_enum.NEWLINE) LINES += 1;}
+    const AST_CAPACITY = LINES * AVG_NODE_PER_LINE;
+    
     var Ast = try ArrayList(Node).initCapacity(alloc,AST_CAPACITY);
     
     try Ast.append(Node{.typ = .PROGRAM, .children = ArrayList(u32).init(alloc)});
-    //try Ast.items[0].children.append(1);
     
     var idx : usize = 0;
     
     errdefer {
-        // freeNodesValues(Ast,alloc);
-        // Ast.deinit();
-        // lex.freeTokenValues(tok_list,alloc,0);
         freeAST(tok_list,Ast,alloc);
         
         // TODO in future use token to print out where the error is and only then free it
@@ -481,41 +482,31 @@ const expect = std.testing.expect;
 const test_alloc = std.testing.allocator;
 
 
+// if(true) return error.SkipZigTest;
 test "par expression" {
-    // if(true) return error.SkipZigTest;
-    var tokens = try lex.tokenize("foo.abc + bar[-1] * (7 % 2)", test_alloc);
+    var tokens = try lex.tokenize("a + 5 - foo[1] + (2 + 2) * 45 % (54 == abc(453))", test_alloc);
     var res    = try parse(tokens, test_alloc);
     defer    freeAST(tokens,res,test_alloc);
+
     try printNodes(res,0,0);
 }
 
 test "par unclosed parenthesis for expression" {
-    if(true) return error.SkipZigTest;
     var tokens = try lex.tokenize("a[69] + (2 + 2", test_alloc);
     if(parse(tokens, test_alloc)) |res|{
         freeAST(tokens,res,test_alloc);
         unreachable;
     }else |err| {
-        test_alloc.free(tokens);
         try expect(err == ParserError.UnclosedParenExpr);
     }
 }
 
 test "par unclosed parenthesis for function" {
-    if(true) return error.SkipZigTest;
     var tokens = try lex.tokenize("foo(69", test_alloc);
     if(parse(tokens, test_alloc)) |res|{
         freeAST(tokens,res,test_alloc);
         unreachable;
     }else |err| {
-        test_alloc.free(tokens);
         try expect(err == ParserError.UnclosedParenFunc);
     }
-}
-
-test "par parsing a file instead of const string" {
-    if(true) return error.SkipZigTest;
-    var res = try parseFile("exp.piwo",test_alloc);
-    try printNodes(res.ast.*,0);
-    freeAST(res.tokens,res.ast,test_alloc);
 }
