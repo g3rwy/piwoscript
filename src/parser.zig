@@ -5,7 +5,7 @@ const readFileToString = @import("utils.zig").readFileToString;
 const Tok_enum = lex.Tok_enum;
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
-const Array = std.BoundedArray;
+// const Array = std.BoundedArray;
 
 const AVG_NODE_PER_LINE = 6;
 
@@ -14,8 +14,9 @@ pub const NodeType = enum {
     STATEMENT,
     
     STRING_LIT,INT_LIT,CHAR_LIT,FLOAT_LIT,BOOL_LIT,ARR_LIT,
-    STRING,INT,CHAR,FLOAT,BOOL,
+    STRING,INT,CHAR,FLOAT,BOOL,KURWA,
     ADD,SUB,MUL,MOD,DIV,AND,OR,NOT,NEG,
+    
     EQUAL,N_EQUAL,MORE,LESS,MORE_E,LESS_E,
 
     ID,FUNC_CALL,PARAMETERS,FIELD_ACCESS,ARR_ACCESS,
@@ -40,6 +41,8 @@ pub const ParserError = error {
     NoIDFieldAccess,
     NoIDGiven,
     IncorrectType,
+    NoAssignWhenNeeded,
+    NoArrBrack,
 };
 
 pub const FilePre = struct {
@@ -206,10 +209,26 @@ fn atom(alloc: Allocator, idx: *usize, tok_list: []const lex.Token,ast : *ArrayL
                 else{ return ParserError.UnclosedParenExpr; }
             }
             // if not, maybe its array literal, so do the same shit as func but for array
+            if(tok_list[idx.*].tok == Tok_enum.L_CURLY){
+                idx.* += 1;
+                var arr_lit = Node{.typ = .ARR_LIT ,.children =  ArrayList(u32).init(alloc) };
+                errdefer arr_lit.children.deinit();
+
+                try ast.append(arr_lit);
+                const arr_idx = @truncate(u32, ast.items.len - 1);
+                
+                const params = try func_params(alloc,idx,tok_list,ast);
+                if(tok_list[idx.*].tok == Tok_enum.R_CURLY){
+                    idx.* += 1;
+                    try ast.items[arr_idx].children.append(params);
+                    return arr_idx;
+                }
+            }
                
         }
     }
     std.debug.print("\n{s}\n",.{tok_list});
+    std.debug.print("\n{s}\n",.{tok_list[idx.*]});
     return ParserError.NotMatch;
 }
 
@@ -332,7 +351,6 @@ fn comparison(alloc: Allocator, idx: *usize, tok_list: []const lex.Token,ast : *
 
         try ast.items[tree_idx].children.append(lhs);
         try ast.items[tree_idx].children.append(rhs);
-        // try ast.items[pan_idx].children.append(tree_idx);
 
         if(tok_list[idx.*].tok == .BIGGER or tok_list[idx.*].tok == .SMALLER) { return comparison(alloc,idx,tok_list,ast,tree_idx); }
         
@@ -365,7 +383,6 @@ fn equality(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, ast : *Ar
 
             try ast.items[tree_idx].children.append(lhs);
             try ast.items[tree_idx].children.append(rhs);
-            // try ast.items[pan_idx].children.append(tree_idx);
 
             if(tok_list[idx.*].tok == .EQU or tok_list[idx.*].tok == Tok_enum.NOT) { return equality(alloc,idx,tok_list,ast,tree_idx); }
 
@@ -400,7 +417,6 @@ fn and_or(alloc: Allocator, idx: *usize, tok_list: []const lex.Token, ast : *Arr
         
         try ast.items[tree_idx].children.append(lhs);
         try ast.items[tree_idx].children.append(rhs);
-        // try ast.items[pan_idx].children.append(tree_idx);
 
         
         if(tok_list[idx.*].tok == Tok_enum.AND or tok_list[idx.*].tok == Tok_enum.OR) { return and_or(alloc,idx,tok_list,ast,tree_idx); }
@@ -420,8 +436,8 @@ fn expression(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, ast : *
     try ast.append(exp); // Add exp node to array of nodes (add it on tree)
     const exp_idx = @truncate(u32, ast.items.len - 1);
     try ast.items[pan_idx].children.append(exp_idx); // Add exp as children to parent sitting at pan_idx
-
     const result = try and_or(alloc,idx,tok_list,ast,null);
+
     try ast.items[exp_idx].children.append(result);
 }
 
@@ -455,13 +471,14 @@ fn statement(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, ast : *A
             }
             else{ return ParserError.NoIDGiven; }
         },
+        // Variable declaration
         Tok_enum.PIWO => {
             stat.typ = .VAR_DECL;
             try ast.append(stat);
             const decl_idx = @truncate(u32, ast.items.len - 1);
             idx.* += 1;
             var is_kurwa : bool = false;
-            const is_type = @enumToInt(tok_list[idx.*].tok) >= @enumToInt(Tok_enum.STRING_LIT)
+            const is_type = @enumToInt(tok_list[idx.*].tok) >= @enumToInt(Tok_enum.STRING_TYPE)
                         and @enumToInt(tok_list[idx.*].tok) <= @enumToInt(Tok_enum.KURWA_TYPE);
 
             if(tok_list[idx.*].tok == Tok_enum.IDENTIFIER or is_type){
@@ -489,8 +506,122 @@ fn statement(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, ast : *A
             }
             else{ return ParserError.NoIDGiven;}
             idx.* += 1;
+
+            if(tok_list[idx.*].tok == Tok_enum.EQU or is_kurwa) {
+                    if(is_kurwa and tok_list[idx.*].tok != Tok_enum.EQU) return ParserError.NoAssignWhenNeeded; 
+                    idx.* += 1;
+                    try expression(alloc, idx, tok_list, ast, decl_idx);
+            }
             
+            try ast.items[pan_idx].children.append(decl_idx);
         },
+        // Constant declaration
+        Tok_enum.WINO => {
+                    stat.typ = .CONST_DECL;
+                    try ast.append(stat);
+                    const decl_idx = @truncate(u32, ast.items.len - 1);
+                    idx.* += 1;
+                    
+                    const is_type = @enumToInt(tok_list[idx.*].tok) >= @enumToInt(Tok_enum.STRING_TYPE)
+                                and @enumToInt(tok_list[idx.*].tok) <= @enumToInt(Tok_enum.KURWA_TYPE);
+        
+                    if(tok_list[idx.*].tok == Tok_enum.IDENTIFIER or is_type){
+                        var typ_node : Node = undefined;
+                        errdefer typ_node.children.deinit();
+                        if(is_type) {
+                            const t = @intToEnum(NodeType,@enumToInt(tok_list[idx.*].tok) - @enumToInt(Tok_enum.STRING_TYPE) + @enumToInt(NodeType.STRING));
+                            typ_node = Node{.typ = t, .children = ArrayList(u32).init(alloc)};
+                        }
+                        else{
+                            typ_node = Node{.typ = .ID, .children = ArrayList(u32).init(alloc), .value = tok_list[idx.*].value.?};            
+                        }
+                        try ast.append(typ_node);
+                        try ast.items[decl_idx].children.append(@truncate(u32, ast.items.len - 1));
+                        
+                    }else { return ParserError.IncorrectType; }
+                    idx.* += 1;
+        
+                    if(tok_list[idx.*].tok == Tok_enum.IDENTIFIER){
+                        var id = Node{.typ = .ID, .children = ArrayList(u32).init(alloc), .value = tok_list[idx.*].value.?};
+                        errdefer id.children.deinit();
+                        try ast.append(id);
+                        try ast.items[decl_idx].children.append(@truncate(u32, ast.items.len - 1));
+                    }
+                    else{ return ParserError.NoIDGiven;}
+                    idx.* += 1;
+        
+                    if(tok_list[idx.*].tok == Tok_enum.EQU) { 
+                            idx.* += 1;
+                            try expression(alloc, idx, tok_list, ast, decl_idx);
+                    }
+                    else { return ParserError.NoAssignWhenNeeded; }
+                    
+                    try ast.items[pan_idx].children.append(decl_idx);
+                },
+        // Array declaration
+        Tok_enum.KUFEL => { 
+                    stat.typ = .ARR_DECL;
+                    try ast.append(stat);
+                    const decl_idx = @truncate(u32, ast.items.len - 1);
+                    idx.* += 1;
+                    
+                    var is_kurwa: bool = false;
+                    const is_type = @enumToInt(tok_list[idx.*].tok) >= @enumToInt(Tok_enum.STRING_TYPE)
+                                and @enumToInt(tok_list[idx.*].tok) <= @enumToInt(Tok_enum.KURWA_TYPE);
+                    
+                    if(tok_list[idx.*].tok == Tok_enum.IDENTIFIER or is_type){
+                        is_kurwa = tok_list[idx.*].tok == Tok_enum.KURWA_TYPE;
+                        var typ_node : Node = undefined;
+                        errdefer typ_node.children.deinit();
+                        if(is_type) {
+                            const t = @intToEnum(NodeType,@enumToInt(tok_list[idx.*].tok) - @enumToInt(Tok_enum.STRING_TYPE) + @enumToInt(NodeType.STRING));
+                            typ_node = Node{.typ = t, .children = ArrayList(u32).init(alloc)};
+                        }
+                        else{
+                            typ_node = Node{.typ = .ID, .children = ArrayList(u32).init(alloc), .value = tok_list[idx.*].value.?};            
+                        }
+                        try ast.append(typ_node);
+                        try ast.items[decl_idx].children.append(@truncate(u32, ast.items.len - 1));
+                        
+                    }else { return ParserError.IncorrectType; }
+                    idx.* += 1;
+
+                    if(tok_list[idx.*].tok == Tok_enum.IDENTIFIER){
+                        var id = Node{.typ = .ID, .children = ArrayList(u32).init(alloc), .value = tok_list[idx.*].value.?};
+                        errdefer id.children.deinit();
+                        try ast.append(id);
+                        try ast.items[decl_idx].children.append(@truncate(u32, ast.items.len - 1));
+                    }
+                    else{ return ParserError.NoIDGiven;}
+                    idx.* += 1;
+                
+                    if(tok_list[idx.*].tok != Tok_enum.L_BRACK) return ParserError.NoArrBrack;
+
+                    var params = Node{.typ = .PARAMETERS, .children = ArrayList(u32).init(alloc)};
+                    errdefer params.children.deinit();
+                    try ast.append(params);
+                    const params_idx =  @truncate(u32, ast.items.len - 1);
+
+                    while(tok_list[idx.*].tok == Tok_enum.L_BRACK){
+                        idx.* += 1;
+                        if(expression(alloc, idx, tok_list, ast, params_idx)) {} else |err| {
+                            if(err != ParserError.NotMatch) return err;
+                        }
+                        
+                        if(tok_list[idx.*].tok == Tok_enum.R_BRACK){ idx.* += 1; }
+                        else{ return ParserError.UnclosedBrackArr; }
+                    }
+                    
+                    try ast.items[decl_idx].children.append(params_idx);
+
+                    if(tok_list[idx.*].tok == Tok_enum.EQU or is_kurwa) {
+                            if(is_kurwa and tok_list[idx.*].tok != Tok_enum.EQU) return ParserError.NoAssignWhenNeeded; 
+                            idx.* += 1;
+                            try expression(alloc, idx, tok_list, ast, decl_idx);
+                    }
+                    
+                    try ast.items[pan_idx].children.append(decl_idx);
+                },
         else => {
             return ParserError.NotMatch;
         } 
@@ -566,7 +697,9 @@ const test_alloc = std.testing.allocator;
 
 // if(true) return error.SkipZigTest;
 test "par expression" {
-    var tokens = try lex.tokenize("piwo int foo = -10", test_alloc);
+    if(true) return error.SkipZigTest;
+
+    var tokens = try lex.tokenize("{abc, \"string\", 560}", test_alloc);
     var res    = try parse(tokens, test_alloc);
     defer    freeAST(tokens,res,test_alloc);
 
@@ -574,19 +707,22 @@ test "par expression" {
 }
 
 test "par unclosed parenthesis for expression" {
-     if(true) return error.SkipZigTest;
+    // if(true) return error.SkipZigTest;
+    const source = \\
+    \\kufel string tablica[1]
+    \\wino kurwa abc = "shit"
+    \\piwo some_struct struktura
+    ;
+    
+    var tokens = try lex.tokenize(source, test_alloc);
+    var res    = try parse(tokens, test_alloc);
+    defer    freeAST(tokens,res,test_alloc);
 
-    var tokens = try lex.tokenize("a[69] + (2 + 2", test_alloc);
-    if(parse(tokens, test_alloc)) |res|{
-        freeAST(tokens,res,test_alloc);
-        unreachable;
-    }else |err| {
-        try expect(err == ParserError.UnclosedParenExpr);
-    }
+    try printNodes(res,0,0);
 }
 
 test "par unclosed parenthesis for function" {
-     if(true) return error.SkipZigTest;
+    if(true) return error.SkipZigTest;
     var tokens = try lex.tokenize("foo(69", test_alloc);
     if(parse(tokens, test_alloc)) |res|{
         freeAST(tokens,res,test_alloc);
