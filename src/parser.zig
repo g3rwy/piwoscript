@@ -13,7 +13,7 @@ pub const NodeType = enum {
     PROGRAM, 
     STATEMENT,
     
-    STRING_LIT,INT_LIT,CHAR_LIT,FLOAT_LIT,BOOL_LIT,ARR_LIT,
+    STRING_LIT,INT_LIT,CHAR_LIT,FLOAT_LIT,BOOL_LIT,ARR_LIT,FIELD,
     STRING,INT,CHAR,FLOAT,BOOL,KURWA,
     ADD,SUB,MUL,MOD,DIV,AND,OR,NOT,NEG,
     
@@ -22,7 +22,7 @@ pub const NodeType = enum {
     ID,FUNC_CALL,PARAMETERS,FIELD_ACCESS,ARR_ACCESS,
 
     IF,WHILE,PRINT,INPUT,FOREACH,
-    VAR_DECL,CONST_DECL,ARR_DECL,ASSIGN,
+    VAR_DECL,CONST_DECL,ARR_DECL,STRUCT_DECL,ASSIGN,
     EXPR,
 };
 
@@ -43,7 +43,26 @@ pub const ParserError = error {
     IncorrectType,
     NoAssignWhenNeeded,
     NoArrBrack,
+    NoStructBrack,
+    KurwaNotAllowed,
 };
+
+pub fn expectToken(tok : Tok_enum, tok_list: []const lex.Token,idx: usize) ParserError {
+    var i :usize = 0;
+    var line : usize = 1;
+    while(i < tok_list.len and i <= idx) : (i += 1){          
+        if(tok_list[i].tok == Tok_enum.NEWLINE){ line += 1; }    
+    }
+    
+    if(@import("builtin").mode == .Debug){
+        std.debug.print("Expected: {s} but got: {s}\nOn line {d}\n",.{tok,tok_list[idx].tok,line});
+    }
+    else{
+        const stdout = std.io.getStdOut().writer();
+        stdout.print("Expected: {s} but got: {s}\nOn line {d}\n",.{tok,tok_list[idx].tok,line});
+    }
+    return ParserError.NotMatch;
+}
 
 pub const FilePre = struct {
     tokens : [] const lex.Token,
@@ -227,7 +246,7 @@ fn atom(alloc: Allocator, idx: *usize, tok_list: []const lex.Token,ast : *ArrayL
                
         }
     }
-    std.debug.print("\n{s}\n",.{tok_list});
+    // std.debug.print("\n{s}\n",.{tok_list});
     std.debug.print("\n{s}\n",.{tok_list[idx.*]});
     return ParserError.NotMatch;
 }
@@ -622,6 +641,99 @@ fn statement(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, ast : *A
                     
                     try ast.items[pan_idx].children.append(decl_idx);
                 },
+        Tok_enum.BECZKA => {
+                            stat.typ = .STRUCT_DECL;
+                            try ast.append(stat);
+                            const decl_idx = @truncate(u32, ast.items.len - 1);
+                            idx.* += 1;
+                            
+                            if(tok_list[idx.*].tok == Tok_enum.IDENTIFIER){
+                                var id = Node{.typ = .ID, .children = ArrayList(u32).init(alloc), .value = tok_list[idx.*].value.?};
+                                errdefer id.children.deinit();
+                                try ast.append(id);
+                                try ast.items[decl_idx].children.append(@truncate(u32, ast.items.len - 1));
+                            }
+                            else{ return ParserError.NoIDGiven;}
+                            idx.* += 1;
+                
+                            if(tok_list[idx.*].tok == Tok_enum.EQU) { idx.* += 1; }
+                            else { return ParserError.NoAssignWhenNeeded; }
+
+                            if(tok_list[idx.*].tok == Tok_enum.L_CURLY){ idx.* += 1; }
+                            else { return ParserError.NoStructBrack; }
+if(tok_list[idx.*].tok == Tok_enum.NEWLINE){ idx.* += 1; }
+
+                            // TODO Make it a function, so i can reuse it in function declaration
+                            // if(tok_list[idx.*].tok != Tok_enum.IDENTIFIER or tok_list[idx.*].tok != Tok_enum.INDENT){ return ParserError.NoIDGiven; }
+    //beczka Gracz = {
+    //    hp: int,
+    //    name:string
+    //}
+if(tok_list[idx.*].tok == Tok_enum.INDENT){ idx.* += 1; }
+if(tok_list[idx.*].tok == Tok_enum.NEWLINE){ idx.* += 1; }
+                            var fields = Node{.typ = .PARAMETERS, .children = ArrayList(u32).init(alloc)};
+                            errdefer fields.children.deinit();
+                            try ast.append(fields);
+                            const fields_idx = @truncate(u32, ast.items.len - 1);
+
+                            try ast.items[decl_idx].children.append(fields_idx);
+                            // while(tok_list[idx.*].tok != Tok_enum.NEWLINE) idx.* += 1;
+                            
+                            while(tok_list[idx.*].tok == Tok_enum.IDENTIFIER) {
+                                // making field node
+                                var field = Node{.typ = .FIELD, .children = ArrayList(u32).init(alloc)};
+                                errdefer field.children.deinit();
+                                try ast.append(field);
+                                
+                                const field_idx = @truncate(u32, ast.items.len - 1);
+                                try ast.items[fields_idx].children.append(field_idx);
+
+                                // adding ID from the field
+                                var id = Node{.typ = .ID, .children = ArrayList(u32).init(alloc), .value = tok_list[idx.*].value.?};
+                                errdefer id.children.deinit();
+                                try ast.append(id);
+                                try ast.items[field_idx].children.append(@truncate(u32, ast.items.len - 1));
+                                idx.* += 1;
+                                
+                                // checking for colon between ID and type
+                                if(tok_list[idx.*].tok == Tok_enum.COLON){ idx.* += 1; }
+                                else { return expectToken(Tok_enum.COLON, tok_list, idx.*); }
+
+                                // checking and adding
+                                const is_type = @enumToInt(tok_list[idx.*].tok) >= @enumToInt(Tok_enum.STRING_TYPE)
+                                            and @enumToInt(tok_list[idx.*].tok) <= @enumToInt(Tok_enum.KURWA_TYPE);
+                                if(tok_list[idx.*].tok == Tok_enum.KURWA_TYPE){ return ParserError.KurwaNotAllowed; }
+                                if(tok_list[idx.*].tok == Tok_enum.IDENTIFIER or is_type){
+                                var typ_node : Node = undefined;
+                                errdefer typ_node.children.deinit();
+
+                                if(is_type) {
+                                    const t = @intToEnum(NodeType,@enumToInt(tok_list[idx.*].tok) - @enumToInt(Tok_enum.STRING_TYPE) + @enumToInt(NodeType.STRING));
+                                    typ_node = Node{.typ = t, .children = ArrayList(u32).init(alloc)};
+                                }
+                                else{
+                                    typ_node = Node{.typ = .ID, .children = ArrayList(u32).init(alloc), .value = tok_list[idx.*].value.?};
+                                }
+                                try ast.append(typ_node);
+                                try ast.items[field_idx].children.append(@truncate(u32, ast.items.len - 1));
+                                
+                                }else { return ParserError.IncorrectType; }
+
+                                idx.* += 1;
+                                
+                                // ignore newlines, check for comma for next field
+if(tok_list[idx.*].tok == Tok_enum.NEWLINE){ idx.* += 1; }
+                                if(tok_list[idx.*].tok == Tok_enum.COMMA){ idx.* += 1; }                                
+if(tok_list[idx.*].tok == Tok_enum.DEDENT){ idx.* += 1; }
+if(tok_list[idx.*].tok == Tok_enum.NEWLINE){ idx.* += 1; }
+                          }
+
+if(tok_list[idx.*].tok == Tok_enum.DEDENT){ idx.* += 1; }                        
+                            if(tok_list[idx.*].tok == Tok_enum.R_CURLY){ idx.* += 1; }
+                            else { return expectToken(Tok_enum.R_CURLY, tok_list, idx.*); }
+                            // end
+                            try ast.items[pan_idx].children.append(decl_idx);
+            },
         else => {
             return ParserError.NotMatch;
         } 
@@ -702,7 +814,6 @@ test "par expression" {
     var tokens = try lex.tokenize("{abc, \"string\", 560}", test_alloc);
     var res    = try parse(tokens, test_alloc);
     defer    freeAST(tokens,res,test_alloc);
-
     try printNodes(res,0,0);
 }
 
@@ -712,8 +823,9 @@ test "par unclosed parenthesis for expression" {
     \\kufel string tablica[1]
     \\wino kurwa abc = "shit"
     \\piwo some_struct struktura
+    \\beczka Gracz = {hp: int,name:string,again: bool}
     ;
-    
+
     var tokens = try lex.tokenize(source, test_alloc);
     var res    = try parse(tokens, test_alloc);
     defer    freeAST(tokens,res,test_alloc);
