@@ -59,7 +59,7 @@ pub fn expectToken(tok : Tok_enum, tok_list: []const lex.Token,idx: usize) Parse
     }
     else{
         const stdout = std.io.getStdOut().writer();
-        stdout.print("Expected: {s} but got: {s}\nOn line {d}\n",.{tok,tok_list[idx].tok,line});
+        try stdout.print("Expected: {s} but got: {s}\nOn line {d}\n",.{tok,tok_list[idx].tok,line});
     }
     return ParserError.NotMatch;
 }
@@ -246,7 +246,6 @@ fn atom(alloc: Allocator, idx: *usize, tok_list: []const lex.Token,ast : *ArrayL
                
         }
     }
-    // std.debug.print("\n{s}\n",.{tok_list});
     std.debug.print("\n{s}\n",.{tok_list[idx.*]});
     return ParserError.NotMatch;
 }
@@ -664,11 +663,6 @@ fn statement(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, ast : *A
 if(tok_list[idx.*].tok == Tok_enum.NEWLINE){ idx.* += 1; }
 
                             // TODO Make it a function, so i can reuse it in function declaration
-                            // if(tok_list[idx.*].tok != Tok_enum.IDENTIFIER or tok_list[idx.*].tok != Tok_enum.INDENT){ return ParserError.NoIDGiven; }
-    //beczka Gracz = {
-    //    hp: int,
-    //    name:string
-    //}
 if(tok_list[idx.*].tok == Tok_enum.INDENT){ idx.* += 1; }
 if(tok_list[idx.*].tok == Tok_enum.NEWLINE){ idx.* += 1; }
                             var fields = Node{.typ = .PARAMETERS, .children = ArrayList(u32).init(alloc)};
@@ -677,7 +671,6 @@ if(tok_list[idx.*].tok == Tok_enum.NEWLINE){ idx.* += 1; }
                             const fields_idx = @truncate(u32, ast.items.len - 1);
 
                             try ast.items[decl_idx].children.append(fields_idx);
-                            // while(tok_list[idx.*].tok != Tok_enum.NEWLINE) idx.* += 1;
                             
                             while(tok_list[idx.*].tok == Tok_enum.IDENTIFIER) {
                                 // making field node
@@ -734,6 +727,27 @@ if(tok_list[idx.*].tok == Tok_enum.DEDENT){ idx.* += 1; }
                             // end
                             try ast.items[pan_idx].children.append(decl_idx);
             },
+        
+        // Assign statement
+        Tok_enum.IDENTIFIER => {
+            stat.typ = .ASSIGN;
+            try ast.append(stat);
+            const assign_idx = @truncate(u32, ast.items.len - 1);
+
+            var id = Node{.typ = .ID, .children = ArrayList(u32).init(alloc), .value = tok_list[idx.*].value.?};
+            errdefer id.children.deinit();
+
+            try ast.append(id);
+            try ast.items[assign_idx].children.append(@truncate(u32, ast.items.len - 1));
+            idx.* += 1;
+            
+            if(tok_list[idx.*].tok == Tok_enum.EQU){
+                idx.* += 1;
+                try expression(alloc, idx, tok_list, ast, assign_idx);
+            }else { return expectToken(Tok_enum.EQU, tok_list, idx.*); }
+            
+            try ast.items[pan_idx].children.append(assign_idx);
+        },
         else => {
             return ParserError.NotMatch;
         } 
@@ -817,13 +831,14 @@ test "par expression" {
     try printNodes(res,0,0);
 }
 
-test "par unclosed parenthesis for expression" {
+test "par just testing" {
     // if(true) return error.SkipZigTest;
     const source = \\
     \\kufel string tablica[1]
     \\wino kurwa abc = "shit"
     \\piwo some_struct struktura
     \\beczka Gracz = {hp: int,name:string,again: bool}
+    \\abc = 69.420
     ;
 
     var tokens = try lex.tokenize(source, test_alloc);
