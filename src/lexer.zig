@@ -366,7 +366,7 @@ pub fn tokenize(buffer: []const u8, alloc: std.mem.Allocator) ![]Token {
                 continue;               
             },
             '\'' => {
-                
+                // TODO support for 2 byte char, so polish letters and idk, other shit is possible too, shall not be hard
                  if(idx + 1 < word.len){
                     if(word[idx] == '\\'){ // some slash char
                         idx += 1;

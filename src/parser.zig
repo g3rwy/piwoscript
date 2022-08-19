@@ -45,9 +45,10 @@ pub const ParserError = error {
     NoArrBrack,
     NoStructBrack,
     KurwaNotAllowed,
+    NoIndentForBlock,
 };
 
-pub fn expectToken(tok : Tok_enum, tok_list: []const lex.Token,idx: usize) ParserError {
+pub fn expectToken(tok : Tok_enum, tok_list: []const lex.Token,idx: usize) anyerror {
     var i :usize = 0;
     var line : usize = 1;
     while(i < tok_list.len and i <= idx) : (i += 1){          
@@ -459,7 +460,7 @@ fn expression(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, ast : *
     try ast.items[exp_idx].children.append(result);
 }
 
-fn statement(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, ast : *ArrayList(Node), pan_idx: u32) !void {
+fn statement(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, ast : *ArrayList(Node), pan_idx: u32) anyerror!void {
     var stat = Node{.typ = .STATEMENT, .children = ArrayList(u32).init(alloc)};
     errdefer stat.children.deinit();
 
@@ -748,6 +749,130 @@ if(tok_list[idx.*].tok == Tok_enum.DEDENT){ idx.* += 1; }
             
             try ast.items[pan_idx].children.append(assign_idx);
         },
+        // While loop statement
+        Tok_enum.WHILE => {
+            stat.typ = .WHILE;
+            try ast.append(stat);
+            const block_idx = @truncate(u32, ast.items.len - 1);
+            idx.* += 1;
+            try expression(alloc, idx, tok_list, ast, block_idx);
+
+            if(tok_list[idx.*].tok == Tok_enum.COLON){ idx.* += 1; }
+            else { return expectToken(Tok_enum.COLON, tok_list, idx.*); }
+
+            // one line statement
+            if(tok_list[idx.*].tok != Tok_enum.NEWLINE){
+                try statement(alloc, idx, tok_list, ast, block_idx);
+                if(tok_list[idx.*].tok == Tok_enum.NEWLINE){ idx.* += 1; }
+                try ast.items[pan_idx].children.append(block_idx);
+                return;
+            }
+            // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+            if(tok_list[idx.*].tok == Tok_enum.NEWLINE){ idx.* += 1; }
+            else { return expectToken(Tok_enum.NEWLINE, tok_list, idx.*); }
+
+            if(tok_list[idx.*].tok == Tok_enum.INDENT){ idx.* += 1; }
+            else { return ParserError.NoIndentForBlock; }
+
+            while(tok_list[idx.*].tok != Tok_enum.DEDENT){
+                try statement(alloc, idx, tok_list, ast, block_idx);
+                if(tok_list[idx.*].tok == Tok_enum.NEWLINE){ idx.* += 1; }
+            }
+            idx.* += 1;
+
+            try ast.items[pan_idx].children.append(block_idx);
+        },
+        Tok_enum.IF => {
+            stat.typ = .IF;
+            try ast.append(stat);
+            const block_idx = @truncate(u32, ast.items.len - 1);
+            idx.* += 1;
+            try expression(alloc, idx, tok_list, ast, block_idx);
+
+            if(tok_list[idx.*].tok == Tok_enum.COLON){ idx.* += 1; }
+            else { return expectToken(Tok_enum.COLON, tok_list, idx.*); }
+
+            // one line statement
+            if(tok_list[idx.*].tok != Tok_enum.NEWLINE){
+                try statement(alloc, idx, tok_list, ast, block_idx);
+                if(tok_list[idx.*].tok == Tok_enum.NEWLINE){ idx.* += 1; }
+                try ast.items[pan_idx].children.append(block_idx);
+                return;
+            }
+            // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+            if(tok_list[idx.*].tok == Tok_enum.NEWLINE){ idx.* += 1; }
+            else { return expectToken(Tok_enum.NEWLINE, tok_list, idx.*); }
+
+            if(tok_list[idx.*].tok == Tok_enum.INDENT){ idx.* += 1; }
+            else { return ParserError.NoIndentForBlock; }
+
+            while(tok_list[idx.*].tok != Tok_enum.DEDENT){
+                try statement(alloc, idx, tok_list, ast, block_idx);
+                if(tok_list[idx.*].tok == Tok_enum.NEWLINE){ idx.* += 1; }
+            }
+            idx.* += 1;
+
+            try ast.items[pan_idx].children.append(block_idx);
+        },
+        Tok_enum.FOREACH => {
+            stat.typ = .FOREACH;
+            try ast.append(stat);
+            const block_idx = @truncate(u32, ast.items.len - 1);
+            idx.* += 1;
+
+            //     vvv
+            // dla arr -> el:
+            if(tok_list[idx.*].tok == Tok_enum.IDENTIFIER){}
+            else { return expectToken(Tok_enum.IDENTIFIER, tok_list, idx.*); }
+            var arr = Node{.typ = .ID, .children = ArrayList(u32).init(alloc), .value = tok_list[idx.*].value.?};
+            errdefer arr.children.deinit();
+
+            try ast.append(arr);
+            try ast.items[block_idx].children.append(@truncate(u32, ast.items.len - 1));
+            idx.* += 1;
+
+            //         vv
+            // dla arr -> el:
+            if(tok_list[idx.*].tok == Tok_enum.ARROW){ idx.* += 1; }
+            else { return expectToken(Tok_enum.ARROW, tok_list, idx.*); }
+
+            //            vv
+            // dla arr -> el:
+            if(tok_list[idx.*].tok == Tok_enum.IDENTIFIER){}
+            else { return expectToken(Tok_enum.IDENTIFIER, tok_list, idx.*); }
+            var el = Node{.typ = .ID, .children = ArrayList(u32).init(alloc), .value = tok_list[idx.*].value.?};
+            errdefer el.children.deinit();
+
+            try ast.append(el);
+            try ast.items[block_idx].children.append(@truncate(u32, ast.items.len - 1));
+            idx.* += 1;
+            
+            if(tok_list[idx.*].tok == Tok_enum.COLON){ idx.* += 1; }
+            else { return expectToken(Tok_enum.COLON, tok_list, idx.*); }
+            std.debug.print("HERER\n\n",.{});
+            // one line statement
+            if(tok_list[idx.*].tok != Tok_enum.NEWLINE){
+                try statement(alloc, idx, tok_list, ast, block_idx);
+                if(tok_list[idx.*].tok == Tok_enum.NEWLINE){ idx.* += 1; }
+                try ast.items[pan_idx].children.append(block_idx);
+                return;
+            }
+            // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+            if(tok_list[idx.*].tok == Tok_enum.NEWLINE){ idx.* += 1; }
+            else { return expectToken(Tok_enum.NEWLINE, tok_list, idx.*); }
+
+            if(tok_list[idx.*].tok == Tok_enum.INDENT){ idx.* += 1; }
+            else { return ParserError.NoIndentForBlock; }
+
+            while(tok_list[idx.*].tok != Tok_enum.DEDENT){
+                try statement(alloc, idx, tok_list, ast, block_idx);
+                if(tok_list[idx.*].tok == Tok_enum.NEWLINE){ idx.* += 1; }
+            }
+            idx.* += 1;
+
+            try ast.items[pan_idx].children.append(block_idx);
+        },
+
         else => {
             return ParserError.NotMatch;
         } 
@@ -765,21 +890,18 @@ fn parse(tok_list: []const lex.Token, alloc: Allocator) !ArrayList(Node) {
     try Ast.append(Node{.typ = .PROGRAM, .children = ArrayList(u32).init(alloc)});
     
     var idx : usize = 0;
-    var curr_line : u32 = 1;
     
     errdefer {
         freeAST(tok_list,Ast,alloc);
         // TODO in future use token to print out where the error is and only then free it
     }
-    while(tok_list[idx].tok != Tok_enum.EOF){
+    while(true){
         try statement(alloc, &idx, tok_list, &Ast, 0);
+        if(tok_list[idx].tok == Tok_enum.NEWLINE){ idx += 1; }
+        if(tok_list[idx].tok == Tok_enum.EOF){ break; }
 
-        if(tok_list[idx].tok == Tok_enum.NEWLINE){
-            idx += 1; curr_line += 1;
-        }
-        else{
-            return ParserError.NotMatch; // statement doesn't end with newline so something is wrong
-        }
+        
+        // else{ return ParserError.NotMatch; } // statement doesn't end with newline so something is wrong
     }
 
     return Ast;
@@ -834,13 +956,14 @@ test "par expression" {
 test "par just testing" {
     // if(true) return error.SkipZigTest;
     const source = \\
-    \\kufel string tablica[1]
-    \\wino kurwa abc = "shit"
-    \\piwo some_struct struktura
-    \\beczka Gracz = {hp: int,name:string,again: bool}
-    \\abc = 69.420
+    \\dla tablica -> element: wypisz element
+    \\jezeli tak: wypisz "true"
+    \\dopóki nie: wypisz "false"
+    \\piwo int index = 10
+    \\wino string some_const = "im a const"
+    \\kufel char not_a_string_lol[] = {'\n','\t','\0'}
     ;
-
+    
     var tokens = try lex.tokenize(source, test_alloc);
     var res    = try parse(tokens, test_alloc);
     defer    freeAST(tokens,res,test_alloc);
