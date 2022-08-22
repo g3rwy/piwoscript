@@ -9,6 +9,8 @@ const Allocator = std.mem.Allocator;
 
 const AVG_NODE_PER_LINE = 6;
 
+// TODO function declaration, parameters with [] for arrays and * for reference 
+
 pub const NodeType = enum {
     PROGRAM, 
     STATEMENT,
@@ -21,7 +23,7 @@ pub const NodeType = enum {
 
     ID,FUNC_CALL,PARAMETERS,FIELD_ACCESS,ARR_ACCESS,
 
-    IF,WHILE,PRINT,INPUT,FOREACH,
+    IF,ELSE,WHILE,PRINT,INPUT,FOREACH,
     VAR_DECL,CONST_DECL,ARR_DECL,STRUCT_DECL,ASSIGN,
     EXPR,
 };
@@ -116,9 +118,6 @@ fn field_arr(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, lh : u32
     var res : Node = Node{.typ = .PROGRAM ,.children = ArrayList(u32).init(alloc)};
     errdefer res.children.deinit();
     
-
-    
-
     if(tok_list[idx.*].tok == Tok_enum.PERIOD) {
         res.typ = .FIELD_ACCESS;
         idx.* += 1;
@@ -814,6 +813,37 @@ if(tok_list[idx.*].tok == Tok_enum.DEDENT){ idx.* += 1; }
 
             try ast.items[pan_idx].children.append(block_idx);
         },
+        Tok_enum.ELSE => {
+            stat.typ = .ELSE;
+            try ast.append(stat);
+            const block_idx = @truncate(u32, ast.items.len - 1);
+            idx.* += 1;
+
+            if(tok_list[idx.*].tok == Tok_enum.COLON){ idx.* += 1; }
+            else { return expectToken(Tok_enum.COLON, tok_list, idx.*); }
+
+            // one line statement
+            if(tok_list[idx.*].tok != Tok_enum.NEWLINE){
+                try statement(alloc, idx, tok_list, ast, block_idx);
+                if(tok_list[idx.*].tok == Tok_enum.NEWLINE){ idx.* += 1; }
+                try ast.items[pan_idx].children.append(block_idx);
+                return;
+            }
+            // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+            if(tok_list[idx.*].tok == Tok_enum.NEWLINE){ idx.* += 1; }
+            else { return expectToken(Tok_enum.NEWLINE, tok_list, idx.*); }
+
+            if(tok_list[idx.*].tok == Tok_enum.INDENT){ idx.* += 1; }
+            else { return ParserError.NoIndentForBlock; }
+
+            while(tok_list[idx.*].tok != Tok_enum.DEDENT){
+                try statement(alloc, idx, tok_list, ast, block_idx);
+                if(tok_list[idx.*].tok == Tok_enum.NEWLINE){ idx.* += 1; }
+            }
+            idx.* += 1;
+
+            try ast.items[pan_idx].children.append(block_idx);
+        },
         Tok_enum.FOREACH => {
             stat.typ = .FOREACH;
             try ast.append(stat);
@@ -900,7 +930,6 @@ fn parse(tok_list: []const lex.Token, alloc: Allocator) !ArrayList(Node) {
         if(tok_list[idx].tok == Tok_enum.NEWLINE){ idx += 1; }
         if(tok_list[idx].tok == Tok_enum.EOF){ break; }
 
-        
         // else{ return ParserError.NotMatch; } // statement doesn't end with newline so something is wrong
     }
 
@@ -956,14 +985,9 @@ test "par expression" {
 test "par just testing" {
     // if(true) return error.SkipZigTest;
     const source = \\
-    \\dla tablica -> element: wypisz element
-    \\jezeli tak: wypisz "true"
-    \\dopóki nie: wypisz "false"
-    \\piwo int index = 10
-    \\wino string some_const = "im a const"
-    \\kufel char not_a_string_lol[] = {'\n','\t','\0'}
+    \\jezeli tak: wypisz "true" inaczej:    wypisz "false"
     ;
-    
+    // ^^^ interesting, makes me want to add ternary operator  
     var tokens = try lex.tokenize(source, test_alloc);
     var res    = try parse(tokens, test_alloc);
     defer    freeAST(tokens,res,test_alloc);
@@ -972,8 +996,8 @@ test "par just testing" {
 }
 
 test "par unclosed parenthesis for function" {
-    if(true) return error.SkipZigTest;
-    var tokens = try lex.tokenize("foo(69", test_alloc);
+    // if(true) return error.SkipZigTest;
+    var tokens = try lex.tokenize("jezeli tak: a = foo(69", test_alloc);
     if(parse(tokens, test_alloc)) |res|{
         freeAST(tokens,res,test_alloc);
         unreachable;
