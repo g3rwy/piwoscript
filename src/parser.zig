@@ -9,8 +9,6 @@ const Allocator = std.mem.Allocator;
 
 const AVG_NODE_PER_LINE = 6;
 
-// TODO function declaration, parameters with [] for arrays and * for reference 
-
 pub const NodeType = enum {
     PROGRAM, 
     STATEMENT,
@@ -23,9 +21,11 @@ pub const NodeType = enum {
 
     ID,FUNC_CALL,PARAMETERS,FIELD_ACCESS,ARR_ACCESS,
 
-    IF,ELSE,WHILE,PRINT,INPUT,FOREACH,
-    VAR_DECL,CONST_DECL,ARR_DECL,STRUCT_DECL,ASSIGN,
+    IF,ELSE,WHILE,PRINT,INPUT,FOREACH,RETURN,
+    VAR_DECL,CONST_DECL,ARR_DECL,STRUCT_DECL,FUNC_DECL,ASSIGN,
     EXPR,
+
+    REF,ARR, // used for function declaration parameters, to define passing by reference
 };
 
 pub const Node  = struct {
@@ -50,19 +50,21 @@ pub const ParserError = error {
     NoIndentForBlock,
 };
 
-pub fn expectToken(tok : Tok_enum, tok_list: []const lex.Token,idx: usize) anyerror {
+pub fn expectToken(tok : Tok_enum, tok_list: []const lex.Token,idx: *usize) anyerror!void {
+    if(tok_list[idx.*].tok == tok) { idx.* += 1; return; }
     var i :usize = 0;
+    // FIXME TODO It's bad way to get a line, since it doesn't count empty lines, find a better way to pull it off, maybe integrate lines with get_tok() 
     var line : usize = 1;
-    while(i < tok_list.len and i <= idx) : (i += 1){          
+    while(i < tok_list.len and i <= idx.*) : (i += 1){          
         if(tok_list[i].tok == Tok_enum.NEWLINE){ line += 1; }    
     }
     
     if(@import("builtin").mode == .Debug){
-        std.debug.print("Expected: {s} but got: {s}\nOn line {d}\n",.{tok,tok_list[idx].tok,line});
+        std.debug.print("Expected: {s} but got: {s}\n---On line {d}\n",.{tok,tok_list[idx.*].tok,line});
     }
     else{
         const stdout = std.io.getStdOut().writer();
-        try stdout.print("Expected: {s} but got: {s}\nOn line {d}\n",.{tok,tok_list[idx].tok,line});
+        try stdout.print("Expected: {s} but got: {s}\n---On line {d}\n",.{tok,tok_list[idx.*].tok,line});
     }
     return ParserError.NotMatch;
 }
@@ -464,6 +466,16 @@ fn statement(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, ast : *A
     errdefer stat.children.deinit();
 
     switch(tok_list[idx.*].tok){
+        Tok_enum.RETURN => {
+                    stat.typ = .RETURN;
+                    try ast.append(stat);
+                    const ret_idx = @truncate(u32, ast.items.len - 1);
+                    idx.* += 1;
+                    if(expression(alloc, idx, tok_list, ast, ret_idx)) {} else |err| {
+                            if(err != ParserError.NotMatch) return err;
+                    }
+                    try ast.items[pan_idx].children.append(ret_idx);
+        },
         Tok_enum.PRINT => {
             stat.typ = .PRINT;
             try ast.append(stat);
@@ -640,6 +652,7 @@ fn statement(alloc: Allocator, idx: *usize,tok_list: []const lex.Token, ast : *A
                     
                     try ast.items[pan_idx].children.append(decl_idx);
                 },
+                // TODO FIXME somehow add [] for types so arrays are possible too
         Tok_enum.BECZKA => {
                             stat.typ = .STRUCT_DECL;
                             try ast.append(stat);
@@ -689,8 +702,7 @@ if(tok_list[idx.*].tok == Tok_enum.NEWLINE){ idx.* += 1; }
                                 idx.* += 1;
                                 
                                 // checking for colon between ID and type
-                                if(tok_list[idx.*].tok == Tok_enum.COLON){ idx.* += 1; }
-                                else { return expectToken(Tok_enum.COLON, tok_list, idx.*); }
+                                try expectToken(Tok_enum.COLON, tok_list, idx);
 
                                 // checking and adding
                                 const is_type = @enumToInt(tok_list[idx.*].tok) >= @enumToInt(Tok_enum.STRING_TYPE)
@@ -722,8 +734,7 @@ if(tok_list[idx.*].tok == Tok_enum.NEWLINE){ idx.* += 1; }
                           }
 
 if(tok_list[idx.*].tok == Tok_enum.DEDENT){ idx.* += 1; }                        
-                            if(tok_list[idx.*].tok == Tok_enum.R_CURLY){ idx.* += 1; }
-                            else { return expectToken(Tok_enum.R_CURLY, tok_list, idx.*); }
+                            try expectToken(Tok_enum.R_CURLY, tok_list, idx);
                             // end
                             try ast.items[pan_idx].children.append(decl_idx);
             },
@@ -740,11 +751,10 @@ if(tok_list[idx.*].tok == Tok_enum.DEDENT){ idx.* += 1; }
             try ast.append(id);
             try ast.items[assign_idx].children.append(@truncate(u32, ast.items.len - 1));
             idx.* += 1;
-            
             if(tok_list[idx.*].tok == Tok_enum.EQU){
                 idx.* += 1;
                 try expression(alloc, idx, tok_list, ast, assign_idx);
-            }else { return expectToken(Tok_enum.EQU, tok_list, idx.*); }
+            }else { return expectToken(Tok_enum.EQU, tok_list, idx); }
             
             try ast.items[pan_idx].children.append(assign_idx);
         },
@@ -756,8 +766,7 @@ if(tok_list[idx.*].tok == Tok_enum.DEDENT){ idx.* += 1; }
             idx.* += 1;
             try expression(alloc, idx, tok_list, ast, block_idx);
 
-            if(tok_list[idx.*].tok == Tok_enum.COLON){ idx.* += 1; }
-            else { return expectToken(Tok_enum.COLON, tok_list, idx.*); }
+            try expectToken(Tok_enum.COLON, tok_list, idx);
 
             // one line statement
             if(tok_list[idx.*].tok != Tok_enum.NEWLINE){
@@ -767,11 +776,10 @@ if(tok_list[idx.*].tok == Tok_enum.DEDENT){ idx.* += 1; }
                 return;
             }
             // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-            if(tok_list[idx.*].tok == Tok_enum.NEWLINE){ idx.* += 1; }
-            else { return expectToken(Tok_enum.NEWLINE, tok_list, idx.*); }
+            try expectToken(Tok_enum.NEWLINE, tok_list, idx);
 
-            if(tok_list[idx.*].tok == Tok_enum.INDENT){ idx.* += 1; }
-            else { return ParserError.NoIndentForBlock; }
+            if(expectToken(Tok_enum.INDENT, tok_list, idx)) { }
+            else |err| { std.debug.print("{s}",.{err}); return ParserError.NoIndentForBlock; }
 
             while(tok_list[idx.*].tok != Tok_enum.DEDENT){
                 try statement(alloc, idx, tok_list, ast, block_idx);
@@ -788,8 +796,7 @@ if(tok_list[idx.*].tok == Tok_enum.DEDENT){ idx.* += 1; }
             idx.* += 1;
             try expression(alloc, idx, tok_list, ast, block_idx);
 
-            if(tok_list[idx.*].tok == Tok_enum.COLON){ idx.* += 1; }
-            else { return expectToken(Tok_enum.COLON, tok_list, idx.*); }
+            try expectToken(Tok_enum.COLON, tok_list, idx);
 
             // one line statement
             if(tok_list[idx.*].tok != Tok_enum.NEWLINE){
@@ -799,11 +806,10 @@ if(tok_list[idx.*].tok == Tok_enum.DEDENT){ idx.* += 1; }
                 return;
             }
             // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-            if(tok_list[idx.*].tok == Tok_enum.NEWLINE){ idx.* += 1; }
-            else { return expectToken(Tok_enum.NEWLINE, tok_list, idx.*); }
-
-            if(tok_list[idx.*].tok == Tok_enum.INDENT){ idx.* += 1; }
-            else { return ParserError.NoIndentForBlock; }
+            try expectToken(Tok_enum.NEWLINE, tok_list, idx);
+            
+            if(expectToken(Tok_enum.INDENT, tok_list, idx)) { }
+            else |err| { std.debug.print("{s}",.{err}); return ParserError.NoIndentForBlock; }
 
             while(tok_list[idx.*].tok != Tok_enum.DEDENT){
                 try statement(alloc, idx, tok_list, ast, block_idx);
@@ -819,8 +825,8 @@ if(tok_list[idx.*].tok == Tok_enum.DEDENT){ idx.* += 1; }
             const block_idx = @truncate(u32, ast.items.len - 1);
             idx.* += 1;
 
-            if(tok_list[idx.*].tok == Tok_enum.COLON){ idx.* += 1; }
-            else { return expectToken(Tok_enum.COLON, tok_list, idx.*); }
+            try expectToken(Tok_enum.COLON, tok_list, idx);
+
 
             // one line statement
             if(tok_list[idx.*].tok != Tok_enum.NEWLINE){
@@ -830,10 +836,9 @@ if(tok_list[idx.*].tok == Tok_enum.DEDENT){ idx.* += 1; }
                 return;
             }
             // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-            if(tok_list[idx.*].tok == Tok_enum.NEWLINE){ idx.* += 1; }
-            else { return expectToken(Tok_enum.NEWLINE, tok_list, idx.*); }
-
-            if(tok_list[idx.*].tok == Tok_enum.INDENT){ idx.* += 1; }
+            try expectToken(Tok_enum.NEWLINE, tok_list, idx);
+                        
+            if(tok_list[idx.*].tok == Tok_enum.INDENT) { }
             else { return ParserError.NoIndentForBlock; }
 
             while(tok_list[idx.*].tok != Tok_enum.DEDENT){
@@ -852,8 +857,7 @@ if(tok_list[idx.*].tok == Tok_enum.DEDENT){ idx.* += 1; }
 
             //     vvv
             // dla arr -> el:
-            if(tok_list[idx.*].tok == Tok_enum.IDENTIFIER){}
-            else { return expectToken(Tok_enum.IDENTIFIER, tok_list, idx.*); }
+            if(tok_list[idx.*].tok != Tok_enum.IDENTIFIER) { return expectToken(Tok_enum.IDENTIFIER, tok_list, idx); }
             var arr = Node{.typ = .ID, .children = ArrayList(u32).init(alloc), .value = tok_list[idx.*].value.?};
             errdefer arr.children.deinit();
 
@@ -863,13 +867,12 @@ if(tok_list[idx.*].tok == Tok_enum.DEDENT){ idx.* += 1; }
 
             //         vv
             // dla arr -> el:
-            if(tok_list[idx.*].tok == Tok_enum.ARROW){ idx.* += 1; }
-            else { return expectToken(Tok_enum.ARROW, tok_list, idx.*); }
+            try expectToken(Tok_enum.ARROW, tok_list, idx);
+
 
             //            vv
             // dla arr -> el:
-            if(tok_list[idx.*].tok == Tok_enum.IDENTIFIER){}
-            else { return expectToken(Tok_enum.IDENTIFIER, tok_list, idx.*); }
+            if(tok_list[idx.*].tok != Tok_enum.IDENTIFIER) { return expectToken(Tok_enum.IDENTIFIER, tok_list, idx); }
             var el = Node{.typ = .ID, .children = ArrayList(u32).init(alloc), .value = tok_list[idx.*].value.?};
             errdefer el.children.deinit();
 
@@ -877,9 +880,8 @@ if(tok_list[idx.*].tok == Tok_enum.DEDENT){ idx.* += 1; }
             try ast.items[block_idx].children.append(@truncate(u32, ast.items.len - 1));
             idx.* += 1;
             
-            if(tok_list[idx.*].tok == Tok_enum.COLON){ idx.* += 1; }
-            else { return expectToken(Tok_enum.COLON, tok_list, idx.*); }
-            std.debug.print("HERER\n\n",.{});
+            try expectToken(Tok_enum.COLON, tok_list, idx);
+
             // one line statement
             if(tok_list[idx.*].tok != Tok_enum.NEWLINE){
                 try statement(alloc, idx, tok_list, ast, block_idx);
@@ -888,8 +890,8 @@ if(tok_list[idx.*].tok == Tok_enum.DEDENT){ idx.* += 1; }
                 return;
             }
             // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-            if(tok_list[idx.*].tok == Tok_enum.NEWLINE){ idx.* += 1; }
-            else { return expectToken(Tok_enum.NEWLINE, tok_list, idx.*); }
+            try expectToken(Tok_enum.NEWLINE, tok_list, idx);
+
 
             if(tok_list[idx.*].tok == Tok_enum.INDENT){ idx.* += 1; }
             else { return ParserError.NoIndentForBlock; }
@@ -902,7 +904,133 @@ if(tok_list[idx.*].tok == Tok_enum.DEDENT){ idx.* += 1; }
 
             try ast.items[pan_idx].children.append(block_idx);
         },
+        Tok_enum.FUNC => {
+            stat.typ = .FUNC_DECL;
+            try ast.append(stat);
+            const block_idx = @truncate(u32, ast.items.len - 1);
+            idx.* += 1;
+            // funkcja fib(n:int, arr: string[], ref: int*):
+                // statements
 
+            if(tok_list[idx.*].tok != Tok_enum.IDENTIFIER) { return expectToken(Tok_enum.IDENTIFIER, tok_list, idx); }
+            var id  = Node{.typ = .ID, .children = ArrayList(u32).init(alloc), .value = tok_list[idx.*].value.?};
+            errdefer id.children.deinit();
+
+            try ast.append(id);
+            try ast.items[block_idx].children.append(@truncate(u32, ast.items.len - 1));
+            idx.* += 1;
+
+            try expectToken(Tok_enum.L_PAREN, tok_list, idx);
+
+
+
+            var params = Node{.typ = .PARAMETERS, .children = ArrayList(u32).init(alloc)};
+            errdefer params.children.deinit();
+            try ast.append(params);
+            const params_idx = @truncate(u32, ast.items.len - 1);
+
+            try ast.items[block_idx].children.append(params_idx);
+            
+            while(tok_list[idx.*].tok != Tok_enum.R_PAREN){
+                if(tok_list[idx.*].tok != Tok_enum.IDENTIFIER) { return ParserError.NoIDGiven; }
+                var name  = Node{.typ = .ID, .children = ArrayList(u32).init(alloc), .value = tok_list[idx.*].value.?};
+                errdefer name.children.deinit();
+
+                try ast.append(name);
+                try ast.items[params_idx].children.append(@truncate(u32, ast.items.len - 1));
+                idx.* += 1;
+                
+                try expectToken(Tok_enum.COLON, tok_list, idx);
+
+                const is_type = @enumToInt(tok_list[idx.*].tok) >= @enumToInt(Tok_enum.STRING_TYPE)
+                            and @enumToInt(tok_list[idx.*].tok) <= @enumToInt(Tok_enum.KURWA_TYPE);
+                if(tok_list[idx.*].tok == Tok_enum.KURWA_TYPE){ return ParserError.KurwaNotAllowed; }
+                
+                if(tok_list[idx.*].tok != Tok_enum.IDENTIFIER and !is_type) return ParserError.IncorrectType;
+                
+                var typ_node : Node = undefined;
+                errdefer typ_node.children.deinit();
+
+                if(is_type) {
+                    const t = @intToEnum(NodeType,@enumToInt(tok_list[idx.*].tok) - @enumToInt(Tok_enum.STRING_TYPE) + @enumToInt(NodeType.STRING));
+                    typ_node = Node{.typ = t, .children = ArrayList(u32).init(alloc)};
+                }
+                else{
+                    typ_node = Node{.typ = .ID, .children = ArrayList(u32).init(alloc), .value = tok_list[idx.*].value.?};
+                }
+                try ast.append(typ_node);
+                const typ_idx = @truncate(u32, ast.items.len - 1);
+                try ast.items[params_idx].children.append(typ_idx);
+                idx.* += 1;
+                
+                if(tok_list[idx.*].tok == Tok_enum.MUL){
+                    var ref = Node{.typ = .REF, .children = ArrayList(u32).init(alloc)};
+                    errdefer ref.children.deinit();
+                    try ast.append(ref);
+                    try ast.items[typ_idx].children.append(@truncate(u32, ast.items.len - 1));
+                    idx.* += 1;
+                }
+                if(tok_list[idx.*].tok == Tok_enum.L_BRACK){
+                    if(tok_list[idx.* + 1].tok != Tok_enum.R_BRACK){
+                        idx.* += 1; try expectToken(Tok_enum.R_BRACK, tok_list, idx);
+                    }
+                    var ref = Node{.typ = .ARR, .children = ArrayList(u32).init(alloc)};
+                    errdefer ref.children.deinit();
+                    try ast.append(ref);
+                    try ast.items[typ_idx].children.append(@truncate(u32, ast.items.len - 1));
+                    idx.* += 2;
+                }
+                if(tok_list[idx.*].tok == Tok_enum.COMMA) idx.* += 1;
+            }
+            idx.* += 1;
+            
+            if(tok_list[idx.*].tok == Tok_enum.COLON){ idx.* += 1; }
+            else{ 
+                // no colon so the type of function must be specified
+                try expectToken(Tok_enum.ARROW, tok_list, idx);
+                const is_type = @enumToInt(tok_list[idx.*].tok) >= @enumToInt(Tok_enum.STRING_TYPE)
+                                            and @enumToInt(tok_list[idx.*].tok) <= @enumToInt(Tok_enum.KURWA_TYPE);
+
+                if(tok_list[idx.*].tok == Tok_enum.KURWA_TYPE){ return ParserError.KurwaNotAllowed; }
+                if(tok_list[idx.*].tok != Tok_enum.IDENTIFIER and !is_type) return ParserError.IncorrectType;
+                var typ_node : Node = undefined;
+                errdefer typ_node.children.deinit();
+
+                if(is_type) {
+                    const t = @intToEnum(NodeType,@enumToInt(tok_list[idx.*].tok) - @enumToInt(Tok_enum.STRING_TYPE) + @enumToInt(NodeType.STRING));
+                    typ_node = Node{.typ = t, .children = ArrayList(u32).init(alloc)};
+                }
+                else{
+                    typ_node = Node{.typ = .ID, .children = ArrayList(u32).init(alloc), .value = tok_list[idx.*].value.?};
+                }
+
+                try ast.append(typ_node);
+                try ast.items[block_idx].children.append(@truncate(u32, ast.items.len - 1));
+                idx.* += 1;
+                try expectToken(Tok_enum.COLON, tok_list, idx);
+            }
+            
+            // one line statement
+            if(tok_list[idx.*].tok != Tok_enum.NEWLINE){
+                try statement(alloc, idx, tok_list, ast, block_idx);
+                if(tok_list[idx.*].tok == Tok_enum.NEWLINE){ idx.* += 1; }
+                try ast.items[pan_idx].children.append(block_idx);
+                return;
+            }
+            // -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+            try expectToken(Tok_enum.NEWLINE, tok_list, idx);
+
+            if(tok_list[idx.*].tok == Tok_enum.INDENT){ idx.* += 1; }
+            else { return ParserError.NoIndentForBlock; }
+
+            while(tok_list[idx.*].tok != Tok_enum.DEDENT){
+                try statement(alloc, idx, tok_list, ast, block_idx);
+                if(tok_list[idx.*].tok == Tok_enum.NEWLINE){ idx.* += 1; }
+            }
+            idx.* += 1;
+            
+            try ast.items[pan_idx].children.append(block_idx);
+        },
         else => {
             return ParserError.NotMatch;
         } 
@@ -984,11 +1112,15 @@ test "par expression" {
 
 test "par just testing" {
     // if(true) return error.SkipZigTest;
+    // FIXME tokenizer fucks something up with this
     const source = \\
-    \\jezeli tak: wypisz "true" inaczej:    wypisz "false"
+    \\funkcja fib(n:int) -> int: zwróć fib(n - 1) - fib(n - 2)
+    \\
     ;
     // ^^^ interesting, makes me want to add ternary operator  
     var tokens = try lex.tokenize(source, test_alloc);
+    //std.debug.print("{s}\n",.{tokens});
+
     var res    = try parse(tokens, test_alloc);
     defer    freeAST(tokens,res,test_alloc);
 
@@ -996,7 +1128,7 @@ test "par just testing" {
 }
 
 test "par unclosed parenthesis for function" {
-    // if(true) return error.SkipZigTest;
+    if(true) return error.SkipZigTest;
     var tokens = try lex.tokenize("jezeli tak: a = foo(69", test_alloc);
     if(parse(tokens, test_alloc)) |res|{
         freeAST(tokens,res,test_alloc);
