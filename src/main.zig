@@ -10,7 +10,6 @@ pub fn main() anyerror!void {
     errdefer _ = gpa.deinit();
 
     const argv = try std.process.argsAlloc(alloc);
-    _ = argv;
     defer std.process.argsFree(alloc, argv);
     errdefer std.process.argsFree(alloc, argv);
     
