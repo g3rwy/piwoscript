@@ -1,6 +1,8 @@
 const std = @import("std");
 const lex = @import("lexer.zig");
 const parser = @import("parser.zig"); 
+const analyzer = @import("anal.zig");
+const generator = @import("gen.zig");
 
 pub fn main() anyerror!void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -35,8 +37,16 @@ pub fn main() anyerror!void {
     
     // XXX for now i leave it like this so it doesn't cause a leak :P
     try parser.printNodes(Ast.ast,0,0);
-    parser.freeAST(Ast.tokens,Ast.ast,alloc);
+        
+    try analyzer.analyze(Ast.ast);
+    var buf = std.ArrayList(u8).init(alloc);
+    try generator.generate_c(Ast.ast,buf.writer());
+    // If set, run it or compile it to file 
     
+    std.debug.print("{s}\n",.{buf.items});
+        
+    buf.deinit();
+    parser.freeAST(Ast.tokens,Ast.ast,alloc);    
     } else {
         try stdout.print("No input provided :/\n", .{});
     }
