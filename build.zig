@@ -16,6 +16,8 @@ pub fn build(b: *std.build.Builder) void {
     exe.setTarget(target);
     exe.setBuildMode(mode);
     //deps.addAllTo(exe);
+    exe.linkLibC();
+    exe.linkSystemLibrary("tcc");
     exe.install();
 
     const run_cmd = exe.run();

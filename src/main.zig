@@ -3,6 +3,18 @@ const lex = @import("lexer.zig");
 const parser = @import("parser.zig"); 
 const analyzer = @import("anal.zig");
 const generator = @import("gen.zig");
+const tcc = @cImport({
+   @cInclude("libtcc.h"); 
+});
+
+const headers = @embedFile("runtime/tgc.h") ++ @embedFile("runtime/vec.h");
+
+var errwarn: u32 = 0;
+pub fn errorFunc(data: ?*anyopaque , string: [*c]const u8) callconv(.C) void {
+    _ = data;
+    std.debug.print("PIWO: {s}\n", .{string});
+    errwarn += 1;
+}
 
 pub fn main() anyerror!void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -36,14 +48,32 @@ pub fn main() anyerror!void {
         }
     
     // XXX for now i leave it like this so it doesn't cause a leak :P
-    try parser.printNodes(Ast.ast,0,0);
+    // try parser.printNodes(Ast.ast,0,0);
         
     try analyzer.analyze(Ast.ast);
     var buf = std.ArrayList(u8).init(alloc);
+    try buf.appendSlice(headers); // FIXME Not a good thing to compile all of this with every run :/ so figure out a way to compile it to lib and link to it
+
     try generator.generate_c(Ast.ast,buf.writer());
     // If set, run it or compile it to file 
     
-    std.debug.print("{s}\n",.{buf.items});
+    // std.debug.print("{s}\n",.{buf.items});
+    
+    //Compiling C from buffer
+        var state : *tcc.TCCState = undefined;
+        state = tcc.tcc_new().?;
+        tcc.tcc_set_error_func(state,null,&errorFunc);
+        
+        _ = tcc.tcc_set_output_type(state,tcc.TCC_OUTPUT_MEMORY);
+        try buf.append(0); // null byte for C string
+        if(tcc.tcc_compile_string(state, buf.items.ptr) == -1){
+            try stdout.print("Errors/Warnings: {d}",.{errwarn});
+            @panic("Failed compilation\n");
+        }
+        _ = tcc.tcc_run(state,0,0);
+    
+    tcc.tcc_delete(state);
+    // =====================================
         
     buf.deinit();
     parser.freeAST(Ast.tokens,Ast.ast,alloc);    
