@@ -230,7 +230,7 @@ fn atom(alloc: Allocator, idx: *usize, tok_list: []const lex.Token,ast : *ArrayL
                 else{ return ParserError.UnclosedParenExpr; }
             }
             // if not, maybe its array literal, so do the same shit as func but for array
-            if(tok_list[idx.*].tok == Tok_enum.L_CURLY){
+            if(tok_list[idx.*].tok == Tok_enum.L_CURLY){ // TODO Make Struct literals, might be the same as array literal with some prefix like s
                 idx.* += 1;
                 var arr_lit = Node{.typ = .ARR_LIT ,.children =  ArrayList(u32).init(alloc) };
                 errdefer arr_lit.children.deinit();

@@ -10,7 +10,6 @@
 
 #define VEC_VERSION "0.2.1"
 
-
 #define vec_unpack_(v)\
   (char**)&(v)->data, &(v)->length, &(v)->capacity, sizeof(*(v)->data)
 
@@ -24,7 +23,7 @@
 
 
 #define vec_deinit(v)\
-  ( free((v)->data),\
+  ( tgc_free(&gc,(v)->data),\
     vec_init(v) ) 
 
 
@@ -179,7 +178,7 @@ int vec_expand_(char **data, int *length, int *capacity, int memsz) {
   if (*length + 1 > *capacity) {
     void *ptr;
     int n = (*capacity == 0) ? 1 : *capacity << 1;
-    ptr = realloc(*data, n * memsz);
+    ptr = tgc_realloc(&gc,*data, n * memsz);
     if (ptr == NULL) return -1;
     *data = ptr;
     *capacity = n;
@@ -191,7 +190,7 @@ int vec_expand_(char **data, int *length, int *capacity, int memsz) {
 int vec_reserve_(char **data, int *length, int *capacity, int memsz, int n) {
   (void) length;
   if (n > *capacity) {
-    void *ptr = realloc(*data, n * memsz);
+    void *ptr = tgc_realloc(&gc,*data, n * memsz);
     if (ptr == NULL) return -1;
     *data = ptr;
     *capacity = n;
@@ -212,14 +211,14 @@ int vec_reserve_po2_(
 
 int vec_compact_(char **data, int *length, int *capacity, int memsz) {
   if (*length == 0) {
-    free(*data);
+    tgc_free(&gc,*data);
     *data = NULL;
     *capacity = 0;
     return 0;
   } else {
     void *ptr;
     int n = *length;
-    ptr = realloc(*data, n * memsz);
+    ptr = tgc_realloc(&gc,*data, n * memsz);
     if (ptr == NULL) return -1;
     *capacity = n;
     *data = ptr;

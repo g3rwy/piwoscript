@@ -501,3 +501,5 @@ size_t tgc_get_size(tgc_t *gc, void *ptr) {
   if (p) { return p->size; }
   return 0;
 }
+
+static tgc_t gc;
