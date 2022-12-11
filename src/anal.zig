@@ -25,7 +25,7 @@ fn is_var(node: Node) bool {
     };
 }
 
-const AnalErrors = error{
+pub const AnalErrors = error{
     IncorrectType
 };
 
@@ -218,7 +218,6 @@ pub fn get_expr_type(ast: std.ArrayList(Node), exp: Node) AnalErrors!NodeType {
             @panic("Not implemented or im stupid");
         }
     }
-    return .IncorrectType;
 }
 
 
